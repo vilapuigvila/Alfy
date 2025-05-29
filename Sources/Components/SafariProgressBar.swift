@@ -11,6 +11,10 @@ public struct SafariProgressBar: View {
     @State private var progress: CGFloat = 0.0
     @Binding var isLoading: Bool
     
+    public init(isLoading: Binding<Bool>) {
+        self._isLoading = isLoading
+    }
+    
     public var body: some View {
         if !isLoading {
             withAnimation {
