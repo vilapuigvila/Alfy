@@ -29,7 +29,7 @@ public struct Requester {
             headers.forEach {
                 request.setValue($0.value, forHTTPHeaderField: $0.headerField)
             }
-        }        
+        }
         print("[NETWORK] - \(String(describing: request.allHTTPHeaderFields))")
 //        request.setValue(token, forHTTPHeaderField: "x-api-key")
         
@@ -51,7 +51,7 @@ extension Requester {
     }
     
     public enum HeaderParamCase: Hashable {
-        case custom(key: String, value: String)
+        case custom(headerField: String, value: String)
         case acceptLanguage(value: String)
         case contentType(value: String?)
         
