@@ -32,6 +32,46 @@ public struct Requester {
         return try await _shared.data(for: request)
     }
     
+    public static func request<D: Decodable>(
+        _ urlString: String,
+        headers: [HeaderParam]? = nil
+    ) async throws -> D {
+        guard let url = URL(string: urlString) else {
+            assertionFailure()
+            throw ErrorReason.urlCreationFailed
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        
+        computedHeaders(headers).forEach {
+            request.setValue($0.value, forHTTPHeaderField: $0.headerField)
+        }
+        print("[NETWORK] - \(String(describing: request.allHTTPHeaderFields))")
+        
+        let (data, urlResponse) = try await _shared.data(for: request)
+        
+        if !(200..<300).contains((urlResponse as! HTTPURLResponse).statusCode) {
+            assert((urlResponse as! HTTPURLResponse).statusCode != 204)
+            throw ErrorReason.generic(statusCode: (urlResponse as! HTTPURLResponse).statusCode)
+        }
+        
+        do {
+            return try JSONDecoder().decode(D.self, from: data)
+        } catch {
+            if case DecodingError.keyNotFound(_, let context) = error {
+                assertionFailure(context.debugDescription)
+            } else {
+                assertionFailure(
+                    "\(error.localizedDescription)\n\(String(data: data, encoding: .utf8) ?? "no data")"
+                )
+            }
+            throw error
+        }
+    }
+}
+
+extension Requester {
+    
     private static func computedHeaders(_ headers: [HeaderParam]?) -> [HeaderParam] {
         let mandatoryHeaders: [HeaderParam] = [
             .contentType(value: .none)
@@ -49,6 +89,7 @@ extension Requester {
         case dataCorrupted
         case urlCreationFailed
         case noInternetConnection
+        case generic(statusCode: Int)
     }
     
     public enum HeaderParam: Hashable {
