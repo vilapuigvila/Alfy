@@ -25,7 +25,7 @@ public final class DatabaseManager : DatabaseManagerProtocol {
     private static var _shared: DatabaseManager!
     
     @MainActor
-    public static var shared: DatabaseManager {
+    static var shared: DatabaseManager {
         assert(_shared != nil, "please call makeShared first")
         return _shared!
     }
