@@ -17,7 +17,7 @@ public struct Requester {
     public static func request(
         _ urlString: String,
         headers: [HeaderParam]? = nil
-    ) async throws -> (Data, URLResponse) {
+    ) async throws -> (data: Data, urlResponse: URLResponse) {
         guard let url = URL(string: urlString) else {
             assertionFailure()
             throw ErrorReason.urlCreationFailed
