@@ -14,7 +14,7 @@ public final class DatabaseManager : DatabaseManagerProtocol {
     }
     
     @MainActor
-    static func makeShared(_ types: [any PersistentModel.Type]) -> DatabaseManager {
+    public static func makeShared(_ types: [any PersistentModel.Type]) -> DatabaseManager {
         assert(_shared == nil, "call only once")
         if _shared == nil {
             _shared = DatabaseManager(types)
@@ -25,7 +25,7 @@ public final class DatabaseManager : DatabaseManagerProtocol {
     private static var _shared: DatabaseManager!
     
     @MainActor
-    static var shared: DatabaseManager {
+    public static var shared: DatabaseManager {
         assert(_shared != nil, "please call makeShared first")
         return _shared!
     }
