@@ -27,11 +27,9 @@ public struct Requester {
         
         if let headers {
             headers.forEach {
-                request.setValue($0.value, forHTTPHeaderField: $0.key)
+                request.setValue($0.value, forHTTPHeaderField: $0.headerField)
             }
-        }
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+        }        
         print("[NETWORK] - \(String(describing: request.allHTTPHeaderFields))")
 //        request.setValue(token, forHTTPHeaderField: "x-api-key")
         
@@ -57,7 +55,7 @@ extension Requester {
         case acceptLanguage(value: String)
         case contentType(value: String?)
         
-        var key: String {
+        var headerField: String {
             switch self {
             case .acceptLanguage:
                 return "Accept-Language"
