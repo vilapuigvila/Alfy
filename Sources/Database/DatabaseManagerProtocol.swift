@@ -33,10 +33,11 @@ public protocol DatabaseManagerProtocol {
 //    @MainActor
 //    func transaction<T>(_ block: () throws -> T) rethrows
 }
-
+/*
 extension DatabaseManagerProtocol where Self == DatabaseManager {
     @MainActor
     public static var shared: Self {
         DatabaseManager.shared
     }
 }
+*/
