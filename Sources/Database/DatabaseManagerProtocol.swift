@@ -36,7 +36,7 @@ public protocol DatabaseManagerProtocol {
 
 extension DatabaseManagerProtocol where Self == DatabaseManager {
     @MainActor
-    static var shared: Self {
+    public static var shared: Self {
         DatabaseManager.shared
     }
 }
