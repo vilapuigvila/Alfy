@@ -16,7 +16,7 @@ public struct Requester {
     
     public static func request(
         _ urlString: String,
-        headers: [[String: String]]? = nil
+        headers: [HeaderParamCase]? = nil
     ) async throws -> (Data, URLResponse) {
         guard let url = URL(string: urlString) else {
             assertionFailure()
@@ -26,11 +26,9 @@ public struct Requester {
         request.httpMethod = "GET" // or "POST", etc.
         
         if let headers {
-            headers
-                .flatMap { $0 }
-                .forEach { key, value in
-                    request.setValue(value, forHTTPHeaderField: key)
-                }
+            headers.forEach {
+                request.setValue($0.value, forHTTPHeaderField: $0.key)
+            }
         }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
@@ -47,5 +45,38 @@ extension Requester {
         case dataCorrupted
         case urlCreationFailed
         case noInternetConnection
+    }
+    
+    public struct HeaderParam {
+        let key: String
+        let value: String
+    }
+    
+    public enum HeaderParamCase: Hashable {
+        case custom(key: String, value: String)
+        case acceptLanguage(value: String)
+        case contentType(value: String?)
+        
+        var key: String {
+            switch self {
+            case .acceptLanguage:
+                return "Accept-Language"
+            case .contentType:
+                return "Content-Type"
+            case .custom(let key, _):
+                return key
+            }
+        }
+        
+        var value: String {
+            switch self {
+            case .acceptLanguage(let value):
+                return value
+            case .contentType(let value):
+                return value ?? "application/json"
+            case .custom(_, let value):
+                return value
+            }
+        }
     }
 }
