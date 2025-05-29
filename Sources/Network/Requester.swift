@@ -8,7 +8,6 @@
 import Foundation
 
 public struct Requester {
-//    private static let token = "7r5zloC5zs2MjyxAfdnkd1cvuUeKpvWQ9cONyuPh"
     
     private static var _shared: URLSession = {
         URLSession.shared
@@ -18,37 +17,18 @@ public struct Requester {
         _ urlString: String,
         headers: [HeaderParam]? = nil
     ) async throws -> (data: Data, urlResponse: URLResponse) {
-        guard let url = URL(string: urlString) else {
-            assertionFailure()
-            throw ErrorReason.urlCreationFailed
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
         
-        computedHeaders(headers).forEach {
-            request.setValue($0.value, forHTTPHeaderField: $0.headerField)
-        }
-        print("[NETWORK] - \(String(describing: request.allHTTPHeaderFields))")
-        return try await _shared.data(for: request)
+        let _request = try buildRequest(urlString, headers: headers)
+        return try await _shared.data(for: _request)
     }
     
     public static func request<D: Decodable>(
         _ urlString: String,
         headers: [HeaderParam]? = nil
     ) async throws -> D {
-        guard let url = URL(string: urlString) else {
-            assertionFailure()
-            throw ErrorReason.urlCreationFailed
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
         
-        computedHeaders(headers).forEach {
-            request.setValue($0.value, forHTTPHeaderField: $0.headerField)
-        }
-        print("[NETWORK] - \(String(describing: request.allHTTPHeaderFields))")
-        
-        let (data, urlResponse) = try await _shared.data(for: request)
+        let _request = try buildRequest(urlString, headers: headers)
+        let (data, urlResponse) = try await _shared.data(for: _request)
         
         if !(200..<300).contains((urlResponse as! HTTPURLResponse).statusCode) {
             assert((urlResponse as! HTTPURLResponse).statusCode != 204)
@@ -71,6 +51,20 @@ public struct Requester {
 }
 
 extension Requester {
+    private static func buildRequest(_ urlString: String, headers: [HeaderParam]?) throws -> URLRequest {
+        guard let url = URL(string: urlString) else {
+            assertionFailure()
+            throw ErrorReason.urlCreationFailed
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        
+        computedHeaders(headers).forEach {
+            request.setValue($0.value, forHTTPHeaderField: $0.headerField)
+        }
+        print("Alfy - [NETWORK] - \(String(describing: request.allHTTPHeaderFields))")
+        return request
+    }
     
     private static func computedHeaders(_ headers: [HeaderParam]?) -> [HeaderParam] {
         let mandatoryHeaders: [HeaderParam] = [
