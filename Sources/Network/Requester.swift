@@ -16,24 +16,30 @@ public struct Requester {
     
     public static func request(
         _ urlString: String,
-        headers: [HeaderParamCase]? = nil
+        headers: [HeaderParam]? = nil
     ) async throws -> (Data, URLResponse) {
         guard let url = URL(string: urlString) else {
             assertionFailure()
             throw ErrorReason.urlCreationFailed
         }
         var request = URLRequest(url: url)
-        request.httpMethod = "GET" // or "POST", etc.
+        request.httpMethod = "GET"
         
-        if let headers {
-            headers.forEach {
-                request.setValue($0.value, forHTTPHeaderField: $0.headerField)
-            }
+        computedHeaders(headers).forEach {
+            request.setValue($0.value, forHTTPHeaderField: $0.headerField)
         }
         print("[NETWORK] - \(String(describing: request.allHTTPHeaderFields))")
-//        request.setValue(token, forHTTPHeaderField: "x-api-key")
-        
         return try await _shared.data(for: request)
+    }
+    
+    private static func computedHeaders(_ headers: [HeaderParam]?) -> [HeaderParam] {
+        let mandatoryHeaders: [HeaderParam] = [
+            .contentType(value: .none)
+        ]
+        guard let headers else {
+            return mandatoryHeaders
+        }
+        return headers + mandatoryHeaders
     }
 }
 
@@ -45,15 +51,10 @@ extension Requester {
         case noInternetConnection
     }
     
-    public struct HeaderParam {
-        let key: String
-        let value: String
-    }
-    
-    public enum HeaderParamCase: Hashable {
+    public enum HeaderParam: Hashable {
         case custom(headerField: String, value: String)
         case acceptLanguage(value: String)
-        case contentType(value: String?)
+        case contentType(value: String? = nil)
         
         var headerField: String {
             switch self {
