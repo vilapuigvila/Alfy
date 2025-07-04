@@ -18,9 +18,6 @@ public struct Requester {
         headers: [HeaderParam]? = nil
     ) async throws -> (data: Data, urlResponse: URLResponse) {
         
-        guard NetworkMonitor.shared.isConnected else {
-            throw ErrorReason.noInternetConnection
-        }
         let _request = try buildRequest(urlString, headers: headers)
         return try await _shared.data(for: _request)
     }
@@ -30,14 +27,12 @@ public struct Requester {
         headers: [HeaderParam]? = nil
     ) async throws -> D {
         
-        guard NetworkMonitor.shared.isConnected else {
-            throw ErrorReason.noInternetConnection
-        }
         let _request = try buildRequest(urlString, headers: headers)
         let (data, urlResponse) = try await _shared.data(for: _request)
         
-        if !(200..<300).contains((urlResponse as! HTTPURLResponse).statusCode) {
-            assert((urlResponse as! HTTPURLResponse).statusCode != 204)
+        let statusCode = (urlResponse as! HTTPURLResponse).statusCode
+        if !(200..<300).contains(statusCode) && statusCode != 204 {
+            assert(statusCode != 204)
             throw ErrorReason.generic(statusCode: (urlResponse as! HTTPURLResponse).statusCode)
         }
         
@@ -58,6 +53,9 @@ public struct Requester {
 
 extension Requester {
     private static func buildRequest(_ urlString: String, headers: [HeaderParam]?) throws -> URLRequest {
+        guard NetworkMonitor.shared.isConnected else {
+            throw ErrorReason.noInternetConnection
+        }
         guard let url = URL(string: urlString) else {
             assertionFailure()
             throw ErrorReason.urlCreationFailed
