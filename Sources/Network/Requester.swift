@@ -27,6 +27,9 @@ public struct Requester {
         headers: [HeaderParam]? = nil
     ) async throws -> D {
         
+        guard NetworkMonitor.shared.isConnected else {
+            throw ErrorReason.noInternetConnection
+        }
         let _request = try buildRequest(urlString, headers: headers)
         let (data, urlResponse) = try await _shared.data(for: _request)
         
