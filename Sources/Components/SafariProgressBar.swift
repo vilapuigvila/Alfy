@@ -9,10 +9,10 @@ import SwiftUI
 
 public struct SafariProgressBar: View {
     @State private var progress: CGFloat = 0.0
-    @Binding var isLoading: Bool
+//    @Binding var isLoading: Bool
     
-    public init(isLoading: Binding<Bool>) {
-        self._isLoading = isLoading
+    public init(/*isLoading: Binding<Bool>*/) {
+//        self._isLoading = isLoading
     }
     
     public var body: some View {
@@ -55,9 +55,9 @@ public struct SafariProgressBar: View {
             } else {
                 progress = 0
             }
-            if !isLoading {
-                timer.invalidate()
-            }
+//            if !isLoading {
+//                timer.invalidate()
+//            }
         }
     }
     
@@ -70,7 +70,7 @@ public struct SafariProgressBar: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     progress = 0
-                    isLoading = false
+//                    isLoading = false
                 }
             }
         }
