@@ -37,6 +37,9 @@ public struct SafariProgressBar: View {
                 .onAppear {
                     startLoading(parentWitdh: geometry.size.width)
                 }
+                .onDisappear {
+                    finishLoading()
+                }
             }
         }
     }
