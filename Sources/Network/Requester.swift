@@ -53,7 +53,7 @@ public struct Requester {
 
 extension Requester {
     private static func buildRequest(_ urlString: String, headers: [HeaderParam]?) throws -> URLRequest {
-        guard NetworkMonitor.shared.isConnected else {
+        guard NetworkStatusMonitor.shared.hasConnection else {
             throw ErrorReason.noInternetConnection
         }
         guard let url = URL(string: urlString) else {
