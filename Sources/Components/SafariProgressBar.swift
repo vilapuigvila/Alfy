@@ -16,33 +16,28 @@ public struct SafariProgressBar: View {
     }
     
     public var body: some View {
-        if !isLoading {
-            withAnimation {
-                EmptyView().frame(height: 4)
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .frame(height: 4)
+                    .foregroundColor(Color.gray.opacity(0.3))
+                
+                Rectangle()
+                    .frame(width: progress, height: 4)
+                    .foregroundColor(.gray)
+                    .opacity(progress == 0 ? 0 : 1)
+                    .animation(.linear(duration: animationTimeInterval), value: progress)
             }
-        } else {
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .frame(height: 4)
-                        .foregroundColor(Color.gray.opacity(0.3))
-                    
-                    Rectangle()
-                        .frame(width: progress, height: 4)
-                        .foregroundColor(.gray)
-                        .opacity(progress == 0 ? 0 : 1)
-                        .animation(.linear(duration: animationTimeInterval), value: progress)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .onAppear {
-                    startLoading(parentWitdh: geometry.size.width)
-                }
-                .onDisappear {
-                    finishLoading()
-                }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onAppear {
+                startLoading(parentWitdh: geometry.size.width)
+            }
+            .onDisappear {
+                finishLoading()
             }
         }
     }
+    
     private let animationTimeInterval: TimeInterval = 0.2
     public func startLoading(parentWitdh: CGFloat) {
         progress = 0
