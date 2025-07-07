@@ -16,7 +16,16 @@ let package = Package(
         .package(url: "https://github.com/onevcat/Kingfisher.git", from: "8.3.3"),
     ],
     targets: [
-        .target(name: "Alfy", path: "Sources"),
+//        .target(name: "Alfy", path: "Sources"),
+        .target(
+            name: "Alfy",
+            dependencies: [
+                .product(name: "SDWebImageSVGCoder", package: "SDWebImageSVGCoder"),
+                .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI"),
+                .product(name: "Kingfisher", package: "Kingfisher"),
+                .product(name: "SwiftSoup", package: "SwiftSoup"),
+            ]
+        ),
         .testTarget(
             name: "Tests",
             dependencies: [
