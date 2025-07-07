@@ -5,4 +5,4 @@
 //  Created by albert vila on 29/5/25.
 //
 
-import Foundation
+@_exported import SDWebImageSVGCoder
