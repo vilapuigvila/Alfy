@@ -13,21 +13,12 @@ public final class RequestThrottleController {
         self.extraRequestsLimit = extraRequestsLimit
     }
     
-    public func canStartRequest(at date: Date) -> Bool {
-        if let lastRequestDate, date.timeIntervalSince(lastRequestDate) < minimumInterval {
-            guard extraRequestsRemaining > 0 else {
-                return false
-            }
-            extraRequestsRemaining -= 1
-            return true
+    public func registerRequestIfCanStart(at date: Date) -> Bool {
+        guard canStartRequest(at: date) else {
+            return false
         }
-        extraRequestsRemaining = 0
-        hasGrantedExtraRequests = false
-        return true
-    }
-    
-    public func registerRequest(at date: Date) {
         lastRequestDate = date
+        return true
     }
     
     public func registerOutcome(isFailure: Bool) {
@@ -40,5 +31,18 @@ public final class RequestThrottleController {
         }
         extraRequestsRemaining = extraRequestsLimit
         hasGrantedExtraRequests = true
+    }
+    
+    func canStartRequest(at date: Date) -> Bool {
+        if let lastRequestDate, date.timeIntervalSince(lastRequestDate) < minimumInterval {
+            guard extraRequestsRemaining > 0 else {
+                return false
+            }
+            extraRequestsRemaining -= 1
+            return true
+        }
+        extraRequestsRemaining = 0
+        hasGrantedExtraRequests = false
+        return true
     }
 }
