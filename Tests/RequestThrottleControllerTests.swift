@@ -6,7 +6,7 @@ final class RequestThrottleControllerTests: XCTestCase {
         let controller = makeSut()
         let startDate = Date(timeIntervalSince1970: 1_000)
         
-        let canStart = controller.registerRequestIfCanStart(at: startDate)
+        let canStart = controller.startRequestIfAllowed(at: startDate)
         
         XCTAssertTrue(canStart)
     }
@@ -15,11 +15,11 @@ final class RequestThrottleControllerTests: XCTestCase {
         let controller = makeSut()
         let startDate = Date(timeIntervalSince1970: 1_000)
         
-        var canStart = controller.registerRequestIfCanStart(at: startDate)
+        var canStart = controller.startRequestIfAllowed(at: startDate)
         XCTAssertTrue(canStart)
         
         let secondDate = startDate.addingTimeInterval(30)
-        canStart = controller.registerRequestIfCanStart(at: secondDate)
+        canStart = controller.startRequestIfAllowed(at: secondDate)
         XCTAssertFalse(canStart)
     }
     
@@ -27,22 +27,22 @@ final class RequestThrottleControllerTests: XCTestCase {
         let controller = makeSut()
         let startDate = Date(timeIntervalSince1970: 1_000)
         
-        var canStart = controller.registerRequestIfCanStart(at: startDate)
+        var canStart = controller.startRequestIfAllowed(at: startDate)
         XCTAssertTrue(canStart)
         controller.registerOutcome(
             isFailure: true
         )
         
         let secondDate = startDate.addingTimeInterval(10)
-        canStart = controller.registerRequestIfCanStart(at: secondDate)
+        canStart = controller.startRequestIfAllowed(at: secondDate)
         XCTAssertTrue(canStart)
         
         let thirdDate = startDate.addingTimeInterval(20)
-        canStart = controller.registerRequestIfCanStart(at: thirdDate)
+        canStart = controller.startRequestIfAllowed(at: thirdDate)
         XCTAssertTrue(canStart)
         
         let fourthDate = startDate.addingTimeInterval(30)
-        canStart = controller.registerRequestIfCanStart(at: fourthDate)
+        canStart = controller.startRequestIfAllowed(at: fourthDate)
         XCTAssertFalse(canStart)
     }
     
@@ -50,7 +50,7 @@ final class RequestThrottleControllerTests: XCTestCase {
         let controller = makeSut()
         let startDate = Date(timeIntervalSince1970: 1_000)
         
-        var canStart = controller.registerRequestIfCanStart(at: startDate)
+        var canStart = controller.startRequestIfAllowed(at: startDate)
         XCTAssertTrue(canStart)
         
         controller.registerOutcome(
@@ -58,16 +58,16 @@ final class RequestThrottleControllerTests: XCTestCase {
         )
         
         let firstExtraDate = startDate.addingTimeInterval(10)
-        canStart = controller.registerRequestIfCanStart(at: firstExtraDate)
+        canStart = controller.startRequestIfAllowed(at: firstExtraDate)
         
         XCTAssertTrue(canStart)
         
         let secondExtraDate = startDate.addingTimeInterval(20)
-        canStart = controller.registerRequestIfCanStart(at: secondExtraDate)
+        canStart = controller.startRequestIfAllowed(at: secondExtraDate)
         XCTAssertTrue(canStart)
         
         let resetDate = secondExtraDate.addingTimeInterval(61)
-        canStart = controller.registerRequestIfCanStart(at: resetDate)
+        canStart = controller.startRequestIfAllowed(at: resetDate)
         XCTAssertTrue(canStart)
         
         controller.registerOutcome(
@@ -75,7 +75,7 @@ final class RequestThrottleControllerTests: XCTestCase {
         )
         
         let newExtraDate = resetDate.addingTimeInterval(10)
-        canStart = controller.registerRequestIfCanStart(at: newExtraDate)
+        canStart = controller.startRequestIfAllowed(at: newExtraDate)
         XCTAssertTrue(canStart)
     }
     

@@ -13,7 +13,7 @@ public final class RequestThrottleController {
         self.extraRequestsLimit = extraRequestsLimit
     }
     
-    public func registerRequestIfCanStart(at date: Date) -> Bool {
+    public func startRequestIfAllowed(at date: Date) -> Bool {
         guard canStartRequest(at: date) else {
             return false
         }
