@@ -1,0 +1,44 @@
+import Foundation
+
+public final class RequestThrottleController {
+    
+    private var lastRequestDate: Date?
+    private var extraRequestsRemaining = 0
+    private var hasGrantedExtraRequests = false
+    public let minimumInterval: TimeInterval
+    public let extraRequestsLimit: Int
+    
+    public init(minimumInterval: TimeInterval, extraRequestsLimit: Int) {
+        self.minimumInterval = minimumInterval
+        self.extraRequestsLimit = extraRequestsLimit
+    }
+    
+    public func canStartRequest(at date: Date) -> Bool {
+        if let lastRequestDate, date.timeIntervalSince(lastRequestDate) < minimumInterval {
+            guard extraRequestsRemaining > 0 else {
+                return false
+            }
+            extraRequestsRemaining -= 1
+            return true
+        }
+        extraRequestsRemaining = 0
+        hasGrantedExtraRequests = false
+        return true
+    }
+    
+    public func registerRequest(at date: Date) {
+        lastRequestDate = date
+    }
+    
+    public func registerRequestOutcome(hasEmptySection: Bool, isFailure: Bool) {
+        guard isFailure else {
+            extraRequestsRemaining = 0
+            return
+        }
+        guard !hasGrantedExtraRequests else {
+            return
+        }
+        extraRequestsRemaining = extraRequestsLimit
+        hasGrantedExtraRequests = true
+    }
+}
