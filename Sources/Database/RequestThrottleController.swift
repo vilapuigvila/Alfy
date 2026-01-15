@@ -33,7 +33,7 @@ public final class RequestThrottleController {
         hasGrantedExtraRequests = true
     }
     
-    func canStartRequest(at date: Date) -> Bool {
+    private func canStartRequest(at date: Date) -> Bool {
         if let lastRequestDate, date.timeIntervalSince(lastRequestDate) < minimumInterval {
             guard extraRequestsRemaining > 0 else {
                 return false

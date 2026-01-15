@@ -6,7 +6,7 @@ final class RequestThrottleControllerTests: XCTestCase {
         let controller = makeSut()
         let startDate = Date(timeIntervalSince1970: 1_000)
         
-        let canStart = controller.canStartRequest(at: startDate)
+        let canStart = controller.registerRequestIfCanStart(at: startDate)
         
         XCTAssertTrue(canStart)
     }
@@ -15,66 +15,68 @@ final class RequestThrottleControllerTests: XCTestCase {
         let controller = makeSut()
         let startDate = Date(timeIntervalSince1970: 1_000)
         
-        XCTAssertTrue(controller.canStartRequest(at: startDate))
-        controller.registerRequest(at: startDate)
+        var canStart = controller.registerRequestIfCanStart(at: startDate)
+        XCTAssertTrue(canStart)
         
         let secondDate = startDate.addingTimeInterval(30)
-        
-        XCTAssertFalse(controller.canStartRequest(at: secondDate))
+        canStart = controller.registerRequestIfCanStart(at: secondDate)
+        XCTAssertFalse(canStart)
     }
     
     func testCanStartRequestAllowsExtraRequestsAfterFailure() {
         let controller = makeSut()
         let startDate = Date(timeIntervalSince1970: 1_000)
         
-        XCTAssertTrue(controller.canStartRequest(at: startDate))
-        controller.registerRequest(at: startDate)
-        controller.registerRequestOutcome(
-            hasEmptySection: false,
+        var canStart = controller.registerRequestIfCanStart(at: startDate)
+        XCTAssertTrue(canStart)
+        controller.registerOutcome(
             isFailure: true
         )
         
         let secondDate = startDate.addingTimeInterval(10)
-        XCTAssertTrue(controller.canStartRequest(at: secondDate))
-        controller.registerRequest(at: secondDate)
+        canStart = controller.registerRequestIfCanStart(at: secondDate)
+        XCTAssertTrue(canStart)
         
         let thirdDate = startDate.addingTimeInterval(20)
-        XCTAssertTrue(controller.canStartRequest(at: thirdDate))
-        controller.registerRequest(at: thirdDate)
+        canStart = controller.registerRequestIfCanStart(at: thirdDate)
+        XCTAssertTrue(canStart)
         
         let fourthDate = startDate.addingTimeInterval(30)
-        XCTAssertFalse(controller.canStartRequest(at: fourthDate))
+        canStart = controller.registerRequestIfCanStart(at: fourthDate)
+        XCTAssertFalse(canStart)
     }
     
     func testCanStartRequestGrantsExtraRequestsAgainAfterIntervalReset() {
         let controller = makeSut()
         let startDate = Date(timeIntervalSince1970: 1_000)
         
-        XCTAssertTrue(controller.canStartRequest(at: startDate))
-        controller.registerRequest(at: startDate)
-        controller.registerRequestOutcome(
-            hasEmptySection: false,
+        var canStart = controller.registerRequestIfCanStart(at: startDate)
+        XCTAssertTrue(canStart)
+        
+        controller.registerOutcome(
             isFailure: true
         )
         
         let firstExtraDate = startDate.addingTimeInterval(10)
-        XCTAssertTrue(controller.canStartRequest(at: firstExtraDate))
-        controller.registerRequest(at: firstExtraDate)
+        canStart = controller.registerRequestIfCanStart(at: firstExtraDate)
+        
+        XCTAssertTrue(canStart)
         
         let secondExtraDate = startDate.addingTimeInterval(20)
-        XCTAssertTrue(controller.canStartRequest(at: secondExtraDate))
-        controller.registerRequest(at: secondExtraDate)
+        canStart = controller.registerRequestIfCanStart(at: secondExtraDate)
+        XCTAssertTrue(canStart)
         
         let resetDate = secondExtraDate.addingTimeInterval(61)
-        XCTAssertTrue(controller.canStartRequest(at: resetDate))
-        controller.registerRequest(at: resetDate)
-        controller.registerRequestOutcome(
-            hasEmptySection: false,
+        canStart = controller.registerRequestIfCanStart(at: resetDate)
+        XCTAssertTrue(canStart)
+        
+        controller.registerOutcome(
             isFailure: true
         )
         
         let newExtraDate = resetDate.addingTimeInterval(10)
-        XCTAssertTrue(controller.canStartRequest(at: newExtraDate))
+        canStart = controller.registerRequestIfCanStart(at: newExtraDate)
+        XCTAssertTrue(canStart)
     }
     
     private func makeSut() -> RequestThrottleController {
