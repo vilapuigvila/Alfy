@@ -30,7 +30,7 @@ public final class RequestThrottleController {
         lastRequestDate = date
     }
     
-    public func registerRequestOutcome(hasEmptySection: Bool, isFailure: Bool) {
+    public func registerRequestOutcome(isFailure: Bool) {
         guard isFailure else {
             extraRequestsRemaining = 0
             return
