@@ -59,7 +59,7 @@ public actor CachedURLSession {
     }
 
     public static func configure(
-        ttl: TimeInterval = 120,
+        ttl: TimeInterval = 180,
         session: URLSession = .shared,
         allowStaleOnError: Bool = true,
         maxMemoryEntries: Int = 64,
@@ -250,7 +250,8 @@ public actor CachedURLSession {
         guard (200...299).contains(http.statusCode) else { return nil }
 
         let storedAt = Date()
-        guard let expiresAt = expirationDate(for: http, storedAt: storedAt, fallbackTTL: defaultTTL) else {
+        let timeoutInterval = max(defaultTTL, request.timeoutInterval)
+        guard let expiresAt = expirationDate(for: http, storedAt: storedAt, fallbackTTL: timeoutInterval) else {
             return nil
         }
 
