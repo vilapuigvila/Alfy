@@ -184,6 +184,7 @@ public actor CachedURLSession {
             if let entry = makeCacheEntry(request: request, data: data, response: response) {
                 store(entry, forKey: cacheKey)
             }
+            print("[alfy] - data from network")
             return (data, withCacheHeader(response, cacheState: "MISS"))
         } catch {
             if allowStaleOnError, let stale = loadEntry(forKey: cacheKey) {
@@ -224,7 +225,7 @@ public actor CachedURLSession {
             expectedContentLength: entry.data.count,
             textEncodingName: entry.textEncodingName
         )
-
+        print("[alfy] - data from cache")
         return (entry.data, response)
     }
 
