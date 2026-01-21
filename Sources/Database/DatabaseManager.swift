@@ -6,9 +6,12 @@
 //
 
 import Foundation
+
+#if canImport(SwiftData)
 import SwiftData
 
-public final class DatabaseManager : DatabaseManagerProtocol {
+@available(iOS 17, macOS 14, *)
+public final class DatabaseManager: DatabaseManagerProtocol {
     enum ErrorReason: Error {
         case itemNotFound
     }
@@ -128,3 +131,6 @@ public final class DatabaseManager : DatabaseManagerProtocol {
     }
      */
 }
+#else
+public final class DatabaseManager {}
+#endif

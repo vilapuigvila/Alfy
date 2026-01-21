@@ -29,6 +29,7 @@ final class UserDefaultTests: XCTestCase {
         super.tearDown()
     }
     
+    /// Stores and reads an optional `String` using a mock UserDefaults backend.
     func testStringStorage() {
         @UserDefault("test_string", storage: mockStorage)
         var testString: String?
@@ -39,6 +40,7 @@ final class UserDefaultTests: XCTestCase {
         XCTAssertEqual(testString, "Hello, World!")
     }
     
+    /// Uses a default value when nothing is stored.
     func testDefaultValue() {
         @UserDefault("test_int", defaultValue: 42, storage: mockStorage)
         var testInt: Int?
@@ -46,6 +48,7 @@ final class UserDefaultTests: XCTestCase {
         XCTAssertEqual(testInt, 42)
     }
     
+    /// Publisher emits after the wrapped value changes.
     func testPublisher() {
         @UserDefault("test_publisher", storage: mockStorage)
         var testValue: String?
@@ -65,6 +68,7 @@ final class UserDefaultTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
     
+    /// Reset returns the wrapped value back to its default.
     func testReset() {
         @UserDefault("test_reset", defaultValue: "default", storage: mockStorage)
         var testValue: String?
@@ -94,4 +98,3 @@ class MockUserDefaultsStorage: UserDefaultsStorageProtocol {
         storage.removeValue(forKey: key)
     }
 }
-

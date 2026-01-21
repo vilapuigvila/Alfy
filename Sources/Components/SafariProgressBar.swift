@@ -9,6 +9,7 @@ import SwiftUI
 
 public struct SafariProgressBar: View {
     @State private var progress: CGFloat = 0.0
+    @State private var parentWidth: CGFloat = 0.0
 //    @Binding var isLoading: Bool
     
     public init(/*isLoading: Binding<Bool>*/) {
@@ -40,6 +41,7 @@ public struct SafariProgressBar: View {
     
     private let animationTimeInterval: TimeInterval = 0.2
     public func startLoading(parentWitdh: CGFloat) {
+        parentWidth = parentWitdh
         progress = 0
         
         // Simulate a loading sequence
@@ -59,7 +61,7 @@ public struct SafariProgressBar: View {
     public func finishLoading() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             withAnimation(.easeOut(duration: 0.3)) {
-                progress = UIScreen.main.bounds.width
+                progress = parentWidth
             }
             
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {

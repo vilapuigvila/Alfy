@@ -16,28 +16,28 @@ public enum AppLifecycleEvent {
 
 struct AppLifecycleModifier: ViewModifier {
     let action: (AppLifecycleEvent) -> Void
+
+    #if canImport(UIKit)
     private let publisher = Publishers.Merge(
-        NotificationCenter.default.publisher(
-          for: UIApplication.didEnterBackgroundNotification
-        ),
-        NotificationCenter.default.publisher(
-          for: UIApplication.willEnterForegroundNotification
-        )
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification),
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification),
     )
-    
+
     func body(content: Content) -> some View {
-        content
-            .onReceive(publisher) { notification in
-                switch notification.name {
-                case UIApplication.didEnterBackgroundNotification:
-                    action(.didEnterBackground)
-                case UIApplication.willEnterForegroundNotification:
-                    action(.willEnterForeground(.init()))
-                default:
-                    break
-                }
+        content.onReceive(publisher) { notification in
+            switch notification.name {
+            case UIApplication.didEnterBackgroundNotification:
+                action(.didEnterBackground)
+            case UIApplication.willEnterForegroundNotification:
+                action(.willEnterForeground(.init()))
+            default:
+                break
             }
+        }
     }
+    #else
+    func body(content: Content) -> some View { content }
+    #endif
 }
 
 public extension View {
