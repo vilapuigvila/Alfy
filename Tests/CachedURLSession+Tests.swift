@@ -55,6 +55,30 @@ final class CachedURLSessionTests: XCTestCase {
         XCTAssertEqual(calls.withLock { $0 }, 1)
     }
 
+    func testIsCacheExpiredReturnsTrueWhenMissingOrExpired() async throws {
+        let url = URL(string: "https://example.com/expired-check")!
+
+        TestURLProtocol.requestHandler = { request in
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!,
+                Data("ok".utf8)
+            )
+        }
+
+        let cached = Self.makeCachedSession(ttl: 0.05, allowStaleOnError: true, cacheControlBehavior: .respectServer)
+
+        let isExpiredBeforeFetch = await cached.isCacheExpired(for: url)
+        XCTAssertTrue(isExpiredBeforeFetch)
+
+        _ = try await cached.data(from: url)
+        let isExpiredAfterFetch = await cached.isCacheExpired(for: url)
+        XCTAssertFalse(isExpiredAfterFetch)
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let isExpiredAfterSleep = await cached.isCacheExpired(for: url)
+        XCTAssertTrue(isExpiredAfterSleep)
+    }
+
     /// Uses `URLRequest` initializer with `.useProtocolCachePolicy` and `timeoutInterval: 60`.
     /// First request is network (MISS), second is cached (HIT).
     func testUseProtocolCachePolicyWithTimeoutCachesSecondRequest() async throws {
@@ -391,7 +415,6 @@ final class CachedURLSessionTests: XCTestCase {
     // MARK: - Helpers
 
     /// Builds a `CachedURLSession` that uses `TestURLProtocol` for deterministic responses.
-    /// Uses `CachedURLSession.shared`, so tests should clean up disk cache between runs.
     private static func makeCachedSession(
         ttl: TimeInterval,
         allowStaleOnError: Bool,
@@ -400,14 +423,16 @@ final class CachedURLSessionTests: XCTestCase {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [TestURLProtocol.self]
         let session = URLSession(configuration: config)
-        CachedURLSession.configure(
-            ttl: ttl,
-            session: session,
-            allowStaleOnError: allowStaleOnError,
-            maxMemoryEntries: 64,
-            cacheControlBehavior: cacheControlBehavior
+        return CachedURLSession(
+            configuration: CachedURLSession.Configuration(
+                ttl: ttl,
+                session: session,
+                allowStaleOnError: allowStaleOnError,
+                maxMemoryEntries: 64,
+                cacheNamespace: "Alfy_CachedURLSession_Tests",
+                cacheControlBehavior: cacheControlBehavior
+            )
         )
-        return CachedURLSession.shared
     }
 
     /// Clears the shared `TestURLProtocol` handler to avoid test cross-talk.

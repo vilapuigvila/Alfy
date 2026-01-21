@@ -11,6 +11,7 @@ import CryptoKit
 public actor CachedURLSession {
     
     private static let defaultCacheNamespace = "Alfy_CachedURLSession"
+    private static let minimumCacheTimeToLive: TimeInterval = 10
 
     private enum SharedStorage {
         static let lock = NSLock()
@@ -26,7 +27,7 @@ public actor CachedURLSession {
     }
 
     public struct Configuration {
-        let cacheNamespace: String = "Alfy_CachedURLSession"
+        public var cacheNamespace: String
         
         public var ttl: TimeInterval
         public var session: URLSession
@@ -39,14 +40,14 @@ public actor CachedURLSession {
             session: URLSession = .shared,
             allowStaleOnError: Bool = true,
             maxMemoryEntries: Int = 64,
-//            cacheNamespace: String = CachedURLSession.defaultCacheNamespace,
+            cacheNamespace: String = "Alfy_CachedURLSession",
             cacheControlBehavior: CacheControlBehavior = .respectServer
         ) {
+            self.cacheNamespace = cacheNamespace
             self.ttl = ttl
             self.session = session
             self.allowStaleOnError = allowStaleOnError
             self.maxMemoryEntries = maxMemoryEntries
-//            self.cacheNamespace = cacheNamespace
             self.cacheControlBehavior = cacheControlBehavior
         }
     }
@@ -63,7 +64,7 @@ public actor CachedURLSession {
         session: URLSession = .shared,
         allowStaleOnError: Bool = true,
         maxMemoryEntries: Int = 64,
-//        cacheNamespace: String = CachedURLSession.defaultCacheNamespace,
+        cacheNamespace: String = "Alfy_CachedURLSession",
         cacheControlBehavior: CacheControlBehavior = .respectServer
     ) {
         configure(
@@ -72,7 +73,7 @@ public actor CachedURLSession {
                 session: session,
                 allowStaleOnError: allowStaleOnError,
                 maxMemoryEntries: maxMemoryEntries,
-//                cacheNamespace: cacheNamespace,
+                cacheNamespace: cacheNamespace,
                 cacheControlBehavior: cacheControlBehavior
             )
         )
@@ -103,7 +104,7 @@ public actor CachedURLSession {
     private var memoryCache: [String: CacheEntry] = [:]
     private var inflight: [String: Task<(Data, URLResponse), Error>] = [:]
 
-    private init(configuration: Configuration) {
+    public init(configuration: Configuration) {
         self.defaultTTL = configuration.ttl
         self.session = configuration.session
         self.allowStaleOnError = configuration.allowStaleOnError
@@ -125,6 +126,17 @@ public actor CachedURLSession {
 
     public func data(from url: URL) async throws -> (Data, URLResponse) {
         try await data(for: URLRequest(url: url))
+    }
+
+    /// Returns `true` when there is no cached entry for the URL or the cached entry is expired.
+    public func isCacheExpired(for url: URL) -> Bool {
+        guard let cacheKey = cacheKey(for: URLRequest(url: url)) else {
+            return true
+        }
+        guard let entry = loadEntry(forKey: cacheKey) else {
+            return true
+        }
+        return !isFresh(entry)
     }
 
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
@@ -251,7 +263,8 @@ public actor CachedURLSession {
         guard (200...299).contains(http.statusCode) else { return nil }
 
         let storedAt = Date()
-        let timeoutInterval = max(defaultTTL, request.timeoutInterval)
+        let rawTimeout = request.timeoutInterval == 0 ? defaultTTL : request.timeoutInterval
+        let timeoutInterval = max(Self.minimumCacheTimeToLive, rawTimeout)
         guard let expiresAt = expirationDate(for: http, storedAt: storedAt, fallbackTTL: timeoutInterval) else {
             return nil
         }
