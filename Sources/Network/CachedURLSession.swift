@@ -84,6 +84,12 @@ public actor CachedURLSession {
         case ignoreServer
     }
 
+    private enum RequestPropertyKey {
+        static let allowStaleOnError = "AlfyAllowStaleOnError"
+        static let cacheControlBehavior = "AlfyCacheControlBehavior"
+        static let bypassCache = "AlfyBypassCache"
+    }
+
     private struct CacheEntry: Codable {
         let storedAt: Date
         let expiresAt: Date
@@ -140,6 +146,10 @@ public actor CachedURLSession {
     }
 
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        if shouldBypassCache(for: request) {
+            return try await session.data(for: request)
+        }
+
         guard let cacheKey = cacheKey(for: request) else {
             return try await session.data(for: request)
         }
@@ -191,15 +201,23 @@ public actor CachedURLSession {
     }
 
     private func fetchAndCache(request: URLRequest, cacheKey: String) async throws -> (Data, URLResponse) {
+        let effectiveAllowStaleOnError = allowStaleOnErrorOverride(for: request)
+        let effectiveCacheControlBehavior = cacheControlBehaviorOverride(for: request)
+
         do {
             let (data, response) = try await session.data(for: request)
-            if let entry = makeCacheEntry(request: request, data: data, response: response) {
+            if let entry = makeCacheEntry(
+                request: request,
+                data: data,
+                response: response,
+                cacheControlBehavior: effectiveCacheControlBehavior
+            ) {
                 store(entry, forKey: cacheKey)
             }
             print("[alfy] - data from network")
             return (data, withCacheHeader(response, cacheState: "MISS"))
         } catch {
-            if allowStaleOnError, let stale = loadEntry(forKey: cacheKey) {
+            if effectiveAllowStaleOnError, let stale = loadEntry(forKey: cacheKey) {
                 return cachedResult(from: stale, url: request.url, cacheState: "STALE")
             }
             throw error
@@ -258,14 +276,24 @@ public actor CachedURLSession {
         ) ?? response
     }
 
-    private func makeCacheEntry(request: URLRequest, data: Data, response: URLResponse) -> CacheEntry? {
+    private func makeCacheEntry(
+        request: URLRequest,
+        data: Data,
+        response: URLResponse,
+        cacheControlBehavior: CacheControlBehavior
+    ) -> CacheEntry? {
         guard let http = response as? HTTPURLResponse else { return nil }
         guard (200...299).contains(http.statusCode) else { return nil }
 
         let storedAt = Date()
         let rawTimeout = request.timeoutInterval == 0 ? defaultTTL : request.timeoutInterval
         let timeoutInterval = max(Self.minimumCacheTimeToLive, rawTimeout)
-        guard let expiresAt = expirationDate(for: http, storedAt: storedAt, fallbackTTL: timeoutInterval) else {
+        guard let expiresAt = expirationDate(
+            for: http,
+            storedAt: storedAt,
+            fallbackTTL: timeoutInterval,
+            cacheControlBehavior: cacheControlBehavior
+        ) else {
             return nil
         }
 
@@ -287,7 +315,12 @@ public actor CachedURLSession {
         )
     }
 
-    private func expirationDate(for response: HTTPURLResponse, storedAt: Date, fallbackTTL: TimeInterval) -> Date? {
+    private func expirationDate(
+        for response: HTTPURLResponse,
+        storedAt: Date,
+        fallbackTTL: TimeInterval,
+        cacheControlBehavior: CacheControlBehavior
+    ) -> Date? {
         let cacheControl = headerValue(named: "Cache-Control", in: response)
         if cacheControlBehavior == .respectServer,
            let cacheControl,
@@ -401,5 +434,40 @@ public actor CachedURLSession {
         for key in keysToRemove {
             memoryCache[key] = nil
         }
+    }
+
+    private func allowStaleOnErrorOverride(for request: URLRequest) -> Bool {
+        if let override = URLProtocol.property(
+            forKey: RequestPropertyKey.allowStaleOnError,
+            in: request
+        ) as? Bool {
+            return override
+        }
+        return allowStaleOnError
+    }
+
+    private func cacheControlBehaviorOverride(for request: URLRequest) -> CacheControlBehavior {
+        if let override = URLProtocol.property(
+            forKey: RequestPropertyKey.cacheControlBehavior,
+            in: request
+        ) as? String {
+            switch override {
+            case "ignoreServer":
+                return .ignoreServer
+            default:
+                return .respectServer
+            }
+        }
+        return cacheControlBehavior
+    }
+
+    private func shouldBypassCache(for request: URLRequest) -> Bool {
+        if let override = URLProtocol.property(
+            forKey: RequestPropertyKey.bypassCache,
+            in: request
+        ) as? Bool {
+            return override
+        }
+        return false
     }
 }
