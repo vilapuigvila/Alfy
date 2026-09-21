@@ -11,7 +11,6 @@ import CryptoKit
 public actor CachedURLSession {
     
     private static let defaultCacheNamespace = "Alfy_CachedURLSession"
-    private static let minimumCacheTimeToLive: TimeInterval = 10
 
     private enum SharedStorage {
         static let lock = NSLock()
@@ -88,6 +87,7 @@ public actor CachedURLSession {
         static let allowStaleOnError = "AlfyAllowStaleOnError"
         static let cacheControlBehavior = "AlfyCacheControlBehavior"
         static let bypassCache = "AlfyBypassCache"
+        static let cacheTTL = "AlfyCacheTTL"
     }
 
     private struct CacheEntry: Codable {
@@ -142,7 +142,7 @@ public actor CachedURLSession {
         guard let entry = loadEntry(forKey: cacheKey) else {
             return true
         }
-        return !isFresh(entry)
+        return !isFresh(entry, requestTTL: nil)
     }
 
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
@@ -154,16 +154,18 @@ public actor CachedURLSession {
             return try await session.data(for: request)
         }
 
+        let requestTTL = ttlOverride(for: request)
+
         switch request.cachePolicy {
         case .returnCacheDataDontLoad:
-            if let entry = loadEntry(forKey: cacheKey), isFresh(entry) {
+            if let entry = loadEntry(forKey: cacheKey), isFresh(entry, requestTTL: requestTTL) {
                 return cachedResult(from: entry, url: request.url, cacheState: "HIT")
             }
             throw URLError(.resourceUnavailable)
         case .reloadIgnoringLocalCacheData, .reloadIgnoringLocalAndRemoteCacheData:
             break
         default:
-            if let entry = loadEntry(forKey: cacheKey), isFresh(entry) {
+            if let entry = loadEntry(forKey: cacheKey), isFresh(entry, requestTTL: requestTTL) {
                 return cachedResult(from: entry, url: request.url, cacheState: "HIT")
             }
         }
@@ -229,8 +231,13 @@ public actor CachedURLSession {
         return digest.compactMap { String(format: "%02x", $0) }.joined()
     }
 
-    private func isFresh(_ entry: CacheEntry) -> Bool {
-        Date() < entry.expiresAt
+    /// A request-scoped TTL also caps how old an entry may be, so a caller asking for fresher data
+    /// than the entry was stored with re-fetches instead of inheriting the original lifetime.
+    private func isFresh(_ entry: CacheEntry, requestTTL: TimeInterval?) -> Bool {
+        let now = Date()
+        guard now < entry.expiresAt else { return false }
+        guard let requestTTL else { return true }
+        return now < entry.storedAt.addingTimeInterval(requestTTL)
     }
 
     private func cachedResult(from entry: CacheEntry, url: URL?, cacheState: String) -> (Data, URLResponse) {
@@ -286,12 +293,10 @@ public actor CachedURLSession {
         guard (200...299).contains(http.statusCode) else { return nil }
 
         let storedAt = Date()
-        let rawTimeout = request.timeoutInterval == 0 ? defaultTTL : request.timeoutInterval
-        let timeoutInterval = max(Self.minimumCacheTimeToLive, rawTimeout)
         guard let expiresAt = expirationDate(
             for: http,
             storedAt: storedAt,
-            fallbackTTL: timeoutInterval,
+            fallbackTTL: ttlOverride(for: request) ?? defaultTTL,
             cacheControlBehavior: cacheControlBehavior
         ) else {
             return nil
@@ -321,22 +326,21 @@ public actor CachedURLSession {
         fallbackTTL: TimeInterval,
         cacheControlBehavior: CacheControlBehavior
     ) -> Date? {
-        let cacheControl = headerValue(named: "Cache-Control", in: response)
-        if cacheControlBehavior == .respectServer,
-           let cacheControl,
-           cacheControlLowercasedContainsNoStoreOrNoCache(cacheControl)
-        {
-            return nil
-        }
+        if cacheControlBehavior == .respectServer {
+            let cacheControl = headerValue(named: "Cache-Control", in: response)
+            if let cacheControl, cacheControlLowercasedContainsNoStoreOrNoCache(cacheControl) {
+                return nil
+            }
 
-        if let cacheControl, let maxAge = cacheControlMaxAgeSeconds(cacheControl), maxAge > 0 {
-            return storedAt.addingTimeInterval(TimeInterval(maxAge))
-        }
+            if let cacheControl, let maxAge = cacheControlMaxAgeSeconds(cacheControl), maxAge > 0 {
+                return storedAt.addingTimeInterval(TimeInterval(maxAge))
+            }
 
-        if let expires = headerValue(named: "Expires", in: response),
-           let date = httpDate(expires),
-           date > storedAt {
-            return date
+            if let expires = headerValue(named: "Expires", in: response),
+               let date = httpDate(expires),
+               date > storedAt {
+                return date
+            }
         }
 
         guard fallbackTTL > 0 else { return nil }
@@ -459,6 +463,13 @@ public actor CachedURLSession {
             }
         }
         return cacheControlBehavior
+    }
+
+    private func ttlOverride(for request: URLRequest) -> TimeInterval? {
+        URLProtocol.property(
+            forKey: RequestPropertyKey.cacheTTL,
+            in: request
+        ) as? TimeInterval
     }
 
     private func shouldBypassCache(for request: URLRequest) -> Bool {

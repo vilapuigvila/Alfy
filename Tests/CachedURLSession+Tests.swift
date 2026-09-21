@@ -412,7 +412,108 @@ final class CachedURLSessionTests: XCTestCase {
         XCTAssertEqual(calls.withLock { $0 }, 1)
     }
 
+    /// A per-request TTL overrides the configured default TTL.
+    func testPerRequestTTLOverridesConfiguredDefault() async throws {
+        let url = URL(string: "https://example.com/per-request-ttl")!
+        let calls = Locked<Int>(0)
+
+        TestURLProtocol.requestHandler = { request in
+            let count = calls.withLock { current in
+                current += 1
+                return current
+            }
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!,
+                Data("v\(count)".utf8)
+            )
+        }
+
+        let cached = Self.makeCachedSession(ttl: 60, allowStaleOnError: true, cacheControlBehavior: .respectServer)
+        let request = Self.makeRequest(url: url, ttl: 0.05)
+
+        let (d1, r1) = try await cached.data(for: request)
+        XCTAssertEqual(d1, Data("v1".utf8))
+        XCTAssertEqual((r1 as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Cache"), "MISS")
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+
+        let (d2, r2) = try await cached.data(for: request)
+        XCTAssertEqual(d2, Data("v2".utf8))
+        XCTAssertEqual((r2 as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Cache"), "MISS")
+        XCTAssertEqual(calls.withLock { $0 }, 2)
+    }
+
+    /// A short per-request TTL refetches an entry that is still fresh under the TTL it was stored with.
+    func testShortPerRequestTTLRefetchesEntryStoredWithLongerTTL() async throws {
+        let url = URL(string: "https://example.com/ttl-read-scope")!
+        let calls = Locked<Int>(0)
+
+        TestURLProtocol.requestHandler = { request in
+            let count = calls.withLock { current in
+                current += 1
+                return current
+            }
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!,
+                Data("v\(count)".utf8)
+            )
+        }
+
+        let cached = Self.makeCachedSession(ttl: 60, allowStaleOnError: true, cacheControlBehavior: .respectServer)
+
+        let (d1, _) = try await cached.data(from: url)
+        XCTAssertEqual(d1, Data("v1".utf8))
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+
+        // The stored entry is still fresh under its own 60s lifetime.
+        let (d2, r2) = try await cached.data(from: url)
+        XCTAssertEqual(d2, Data("v1".utf8))
+        XCTAssertEqual((r2 as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Cache"), "HIT")
+
+        // A caller demanding data younger than 0.05s must not inherit that lifetime.
+        let (d3, r3) = try await cached.data(for: Self.makeRequest(url: url, ttl: 0.05))
+        XCTAssertEqual(d3, Data("v2".utf8))
+        XCTAssertEqual((r3 as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Cache"), "MISS")
+        XCTAssertEqual(calls.withLock { $0 }, 2)
+    }
+
+    /// When ignoring server cache control, a server `max-age` does not override the configured TTL.
+    func testIgnoreServerCacheControlIgnoresMaxAge() async throws {
+        let url = URL(string: "https://example.com/maxage-ignored")!
+        let calls = Locked<Int>(0)
+
+        TestURLProtocol.requestHandler = { request in
+            calls.withLock { $0 += 1 }
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Cache-Control": "max-age=60"]
+                )!,
+                Data("short-lived".utf8)
+            )
+        }
+
+        let cached = Self.makeCachedSession(ttl: 0.05, allowStaleOnError: false, cacheControlBehavior: .ignoreServer)
+
+        _ = try await cached.data(from: url)
+        try await Task.sleep(nanoseconds: 150_000_000)
+
+        let (_, response) = try await cached.data(from: url)
+        XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Cache"), "MISS")
+        XCTAssertEqual(calls.withLock { $0 }, 2)
+    }
+
     // MARK: - Helpers
+
+    /// Builds a request carrying the same per-request cache TTL property that `Requester` sets.
+    private static func makeRequest(url: URL, ttl: TimeInterval) -> URLRequest {
+        let request = NSMutableURLRequest(url: url)
+        URLProtocol.setProperty(ttl, forKey: "AlfyCacheTTL", in: request)
+        return request as URLRequest
+    }
 
     /// Builds a `CachedURLSession` that uses `TestURLProtocol` for deterministic responses.
     private static func makeCachedSession(

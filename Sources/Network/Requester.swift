@@ -175,14 +175,18 @@ extension Requester {
         if let cachePolicy = request.cachePolicy {
             urlRequest.cachePolicy = cachePolicy
         }
-        if let ttl = request.ttl {
-            urlRequest.timeoutInterval = ttl
-        }
-        
+
         computedHeaders(request.headers).forEach {
             urlRequest.setValue($0.value, forHTTPHeaderField: $0.headerField)
         }
         
+        if let ttl = request.ttl {
+            URLProtocol.setProperty(
+                ttl,
+                forKey: "AlfyCacheTTL",
+                in: urlRequest
+            )
+        }
         if let allowStaleOnError = request.allowStaleOnError {
             URLProtocol.setProperty(
                 allowStaleOnError,
