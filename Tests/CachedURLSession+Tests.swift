@@ -323,6 +323,138 @@ final class CachedURLSessionTests: XCTestCase {
         XCTAssertEqual(calls.withLock { $0 }, 2)
     }
 
+    /// Offline with a fresh entry: served from cache, no network call.
+    func testOfflineServesFreshCacheEntry() async throws {
+        let url = URL(string: "https://example.com/offline-fresh")!
+        let data = Data("cached".utf8)
+        let online = Locked<Bool>(true)
+        let calls = Locked<Int>(0)
+        TestURLProtocol.requestHandler = { request in
+            calls.withLock { $0 += 1 }
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Cache-Control": "max-age=60"]
+                )!,
+                data
+            )
+        }
+
+        let cached = Self.makeCachedSession(
+            ttl: 60,
+            allowStaleOnError: true,
+            cacheControlBehavior: .respectServer,
+            isOnline: { online.withLock { $0 } }
+        )
+        _ = try await cached.data(from: url)
+        online.withLock { $0 = false }
+
+        let (offlineData, response) = try await cached.data(from: url)
+        XCTAssertEqual(offlineData, data)
+        XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Cache"), "HIT")
+        XCTAssertEqual(calls.withLock { $0 }, 1)
+    }
+
+    /// Offline with an expired entry: served as STALE when allowed, without touching the network.
+    func testOfflineServesStaleEntryWhenAllowed() async throws {
+        let url = URL(string: "https://example.com/offline-stale")!
+        let data = Data("stale".utf8)
+        let online = Locked<Bool>(true)
+        let calls = Locked<Int>(0)
+        TestURLProtocol.requestHandler = { request in
+            calls.withLock { $0 += 1 }
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Cache-Control": "max-age=0"]
+                )!,
+                data
+            )
+        }
+
+        let cached = Self.makeCachedSession(
+            ttl: 0.05,
+            allowStaleOnError: true,
+            cacheControlBehavior: .respectServer,
+            isOnline: { online.withLock { $0 } }
+        )
+        _ = try await cached.data(from: url)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        online.withLock { $0 = false }
+
+        let (staleData, response) = try await cached.data(from: url)
+        XCTAssertEqual(staleData, data)
+        XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Cache"), "STALE")
+        XCTAssertEqual(calls.withLock { $0 }, 1)
+    }
+
+    /// Offline with an expired entry and `allowStaleOnError` off: throws `noInternetConnection`.
+    func testOfflineThrowsWhenEntryExpiredAndStaleDisallowed() async throws {
+        let url = URL(string: "https://example.com/offline-no-stale")!
+        let online = Locked<Bool>(true)
+        TestURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Cache-Control": "max-age=0"]
+                )!,
+                Data("x".utf8)
+            )
+        }
+
+        let cached = Self.makeCachedSession(
+            ttl: 0.05,
+            allowStaleOnError: false,
+            cacheControlBehavior: .respectServer,
+            isOnline: { online.withLock { $0 } }
+        )
+        _ = try await cached.data(from: url)
+        try await Task.sleep(nanoseconds: 150_000_000)
+        online.withLock { $0 = false }
+
+        do {
+            _ = try await cached.data(from: url)
+            XCTFail("Expected noInternetConnection")
+        } catch {
+            guard case Requester.ErrorReason.noInternetConnection = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    /// Offline with nothing cached: throws `noInternetConnection` and never calls the network.
+    func testOfflineThrowsWhenNothingCached() async throws {
+        let url = URL(string: "https://example.com/offline-empty")!
+        let calls = Locked<Int>(0)
+        TestURLProtocol.requestHandler = { _ in
+            calls.withLock { $0 += 1 }
+            throw URLError(.notConnectedToInternet)
+        }
+
+        let cached = Self.makeCachedSession(
+            ttl: 60,
+            allowStaleOnError: true,
+            cacheControlBehavior: .respectServer,
+            isOnline: { false }
+        )
+
+        do {
+            _ = try await cached.data(from: url)
+            XCTFail("Expected noInternetConnection")
+        } catch {
+            guard case Requester.ErrorReason.noInternetConnection = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(calls.withLock { $0 }, 0)
+    }
+
     /// If the network fails and `allowStaleOnError` is false, propagates the network error.
     func testDisallowsStaleOnErrorWhenConfigured() async throws {
         let url = URL(string: "https://example.com/no-stale")!
@@ -519,7 +651,8 @@ final class CachedURLSessionTests: XCTestCase {
     private static func makeCachedSession(
         ttl: TimeInterval,
         allowStaleOnError: Bool,
-        cacheControlBehavior: CachedURLSession.CacheControlBehavior
+        cacheControlBehavior: CachedURLSession.CacheControlBehavior,
+        isOnline: @escaping @Sendable () -> Bool = { true }
     ) -> CachedURLSession {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [TestURLProtocol.self]
@@ -531,7 +664,8 @@ final class CachedURLSessionTests: XCTestCase {
                 allowStaleOnError: allowStaleOnError,
                 maxMemoryEntries: 64,
                 cacheNamespace: "Alfy_CachedURLSession_Tests",
-                cacheControlBehavior: cacheControlBehavior
+                cacheControlBehavior: cacheControlBehavior,
+                isOnline: isOnline
             )
         )
     }

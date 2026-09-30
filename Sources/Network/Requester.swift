@@ -8,7 +8,8 @@
 import Foundation
 
 /// Static GET-only API; every call goes through `CachedURLSession.shared`.
-/// Throws `ErrorReason.noInternetConnection` without touching the network when offline.
+/// When offline, serves the cache (fresh, or stale if `allowStaleOnError`) and throws
+/// `ErrorReason.noInternetConnection` only when nothing usable is cached.
 public struct Requester {
     
     private static var cachedSession: CachedURLSession {
@@ -191,9 +192,6 @@ extension Requester {
     /// Builds the GET `URLRequest` and stamps cache overrides as `URLProtocol` properties.
     /// `CachedURLSession` reads them back by the same key strings.
     private static func buildRequest(_ request: Request) throws -> URLRequest {
-        guard NetworkStatusMonitor.shared.hasConnection else {
-            throw ErrorReason.noInternetConnection
-        }
         guard let url = URL(string: request.urlString) else {
             assertionFailure()
             throw ErrorReason.urlCreationFailed
@@ -256,7 +254,7 @@ extension Requester {
         case dataCorrupted
         /// The string passed is not a valid URL.
         case urlCreationFailed
-        /// `NetworkStatusMonitor` reports offline; thrown before any request or cache lookup.
+        /// `NetworkStatusMonitor` reports offline and the cache has nothing to serve; thrown without touching the network.
         case noInternetConnection
         /// Non-2xx HTTP status (only thrown by the decoding overloads).
         case generic(statusCode: Int)

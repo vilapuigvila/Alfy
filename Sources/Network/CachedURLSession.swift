@@ -39,6 +39,8 @@ public actor CachedURLSession {
         /// Max responses kept in RAM (count, not bytes); the disk cache is not limited.
         public var maxMemoryEntries: Int
         public var cacheControlBehavior: CacheControlBehavior
+        /// Connectivity check; offline requests are served from cache or throw `Requester.ErrorReason.noInternetConnection`.
+        public var isOnline: @Sendable () -> Bool
 
         public init(
             ttl: TimeInterval = 120,
@@ -46,8 +48,10 @@ public actor CachedURLSession {
             allowStaleOnError: Bool = true,
             maxMemoryEntries: Int = 64,
             cacheNamespace: String = "Alfy_CachedURLSession",
-            cacheControlBehavior: CacheControlBehavior = .respectServer
+            cacheControlBehavior: CacheControlBehavior = .respectServer,
+            isOnline: @escaping @Sendable () -> Bool = { NetworkStatusMonitor.shared.hasConnection }
         ) {
+            self.isOnline = isOnline
             self.cacheNamespace = cacheNamespace
             self.ttl = ttl
             self.session = session
@@ -115,6 +119,7 @@ public actor CachedURLSession {
     private let maxMemoryEntries: Int
     private let cacheDirectoryURL: URL
     private let cacheControlBehavior: CacheControlBehavior
+    private let isOnline: @Sendable () -> Bool
 
     private var memoryCache: [String: CacheEntry] = [:]
     private var inflight: [String: Task<(Data, URLResponse), Error>] = [:]
@@ -125,6 +130,7 @@ public actor CachedURLSession {
         self.allowStaleOnError = configuration.allowStaleOnError
         self.maxMemoryEntries = configuration.maxMemoryEntries
         self.cacheControlBehavior = configuration.cacheControlBehavior
+        self.isOnline = configuration.isOnline
         self.cacheDirectoryURL = FileManager.default
             .urls(for: .cachesDirectory, in: .userDomainMask)
             .first?
@@ -158,10 +164,12 @@ public actor CachedURLSession {
     /// On a miss, fetches once per key (deduplicated) and stores the result.
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         if shouldBypassCache(for: request) {
+            try requireConnection()
             return try await session.data(for: request)
         }
 
         guard let cacheKey = cacheKey(for: request) else {
+            try requireConnection()
             return try await session.data(for: request)
         }
 
@@ -219,6 +227,13 @@ public actor CachedURLSession {
         let effectiveAllowStaleOnError = allowStaleOnErrorOverride(for: request)
         let effectiveCacheControlBehavior = cacheControlBehaviorOverride(for: request)
 
+        guard isOnline() else {
+            if effectiveAllowStaleOnError, let stale = loadEntry(forKey: cacheKey) {
+                return cachedResult(from: stale, url: request.url, cacheState: "STALE")
+            }
+            throw Requester.ErrorReason.noInternetConnection
+        }
+
         do {
             let (data, response) = try await session.data(for: request)
             if let entry = makeCacheEntry(
@@ -236,6 +251,12 @@ public actor CachedURLSession {
                 return cachedResult(from: stale, url: request.url, cacheState: "STALE")
             }
             throw error
+        }
+    }
+
+    private func requireConnection() throws {
+        guard isOnline() else {
+            throw Requester.ErrorReason.noInternetConnection
         }
     }
 
