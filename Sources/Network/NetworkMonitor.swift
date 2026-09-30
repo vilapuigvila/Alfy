@@ -9,7 +9,7 @@ import Foundation
 import Network
 import Combine
 
-/// Singleton over `NWPathMonitor`; `Requester` checks `hasConnection` before every request.
+/// Singleton over `NWPathMonitor`; `CachedURLSession` reads `hasConnection` (via its `isOnline` check) to serve cached data or throw `noInternetConnection` when offline.
 /// `onWifi`/`onCellular` reflect the latest path update.
 public final class NetworkStatusMonitor {
     /// Emits `true`/`false` only when connectivity actually changes.
