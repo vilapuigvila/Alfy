@@ -236,7 +236,7 @@ extension Requester {
             )
         }
         
-        print("Alfy - [NETWORK] - \(String(describing: urlRequest.allHTTPHeaderFields))")
+        NetworkLogger.logHeaders(urlRequest.allHTTPHeaderFields)
         return urlRequest as URLRequest
     }
     

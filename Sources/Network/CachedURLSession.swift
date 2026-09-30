@@ -165,12 +165,16 @@ public actor CachedURLSession {
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         if shouldBypassCache(for: request) {
             try requireConnection()
-            return try await session.data(for: request)
+            let result = try await session.data(for: request)
+            NetworkLogger.log(.internet)
+            return result
         }
 
         guard let cacheKey = cacheKey(for: request) else {
             try requireConnection()
-            return try await session.data(for: request)
+            let result = try await session.data(for: request)
+            NetworkLogger.log(.internet)
+            return result
         }
 
         let requestTTL = ttlOverride(for: request)
@@ -244,7 +248,7 @@ public actor CachedURLSession {
             ) {
                 store(entry, forKey: cacheKey)
             }
-            print("[alfy] - data from network")
+            NetworkLogger.log(.internet)
             return (data, withCacheHeader(response, cacheState: "MISS"))
         } catch {
             if effectiveAllowStaleOnError, let stale = loadEntry(forKey: cacheKey) {
@@ -296,7 +300,7 @@ public actor CachedURLSession {
             expectedContentLength: entry.data.count,
             textEncodingName: entry.textEncodingName
         )
-        print("[alfy] - data from cache")
+        NetworkLogger.log(cacheState == "STALE" ? .staleCache : .cache)
         return (entry.data, response)
     }
 
