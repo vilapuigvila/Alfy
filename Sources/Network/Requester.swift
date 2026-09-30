@@ -7,16 +7,21 @@
 
 import Foundation
 
+/// Static GET-only API; every call goes through `CachedURLSession.shared`.
+/// Throws `ErrorReason.noInternetConnection` without touching the network when offline.
 public struct Requester {
     
     private static var cachedSession: CachedURLSession {
         CachedURLSession.shared
     }
     
+    /// Call once at app startup, before any request. Replaces the shared session and drops its in-memory cache.
     public static func configureCache(_ configuration: CachedURLSession.Configuration) {
         CachedURLSession.configure(configuration)
     }
     
+    /// Same as the `Configuration` overload. `ttl` is in **seconds**; `maxMemoryEntries` is a count of responses.
+    /// `cacheNamespace` is the folder name under `Caches/`.
     public static func configureCache(
         ttl: TimeInterval = 180,
         session: URLSession = .shared,
@@ -35,6 +40,7 @@ public struct Requester {
         )
     }
     
+    /// Cached GET returning raw data. Uses the shared cache defaults; for per-request options use `makeRequest`.
     public static func request(
         _ urlString: String,
         headers: [HeaderParam]? = nil
@@ -44,6 +50,7 @@ public struct Requester {
         return try await cachedSession.data(for: _request)
     }
     
+    /// Cached GET decoded as JSON into `D`. Throws `ErrorReason.generic(statusCode:)` for non-2xx.
     public static func request<D: Decodable>(
         _ urlString: String,
         headers: [HeaderParam]? = nil
@@ -57,6 +64,8 @@ public struct Requester {
 }
 
 extension Requester {
+    /// Immutable builder: each modifier returns a modified copy; call `send()` to execute.
+    /// Fields left nil fall back to the `CachedURLSession` configuration.
     public struct Request {
         public let urlString: String
         public var headers: [HeaderParam]
@@ -76,65 +85,81 @@ extension Requester {
             self.isBypassCache = nil
         }
         
+        /// Appends one header. `Content-Type: application/json` is always added after yours.
         public func header(_ header: HeaderParam) -> Request {
             var copy = self
             copy.headers.append(header)
             return copy
         }
         
+        /// Appends several headers to the ones already set; does not replace them.
         public func headers(_ headers: [HeaderParam]) -> Request {
             var copy = self
             copy.headers.append(contentsOf: headers)
             return copy
         }
         
+        /// Only `.returnCacheDataDontLoad` and the two `reload...` policies change behavior; any other value acts as default.
+        /// Prefer `forceRefresh()` / `cacheOnly()`.
         public func cachePolicy(_ policy: URLRequest.CachePolicy) -> Request {
             var copy = self
             copy.cachePolicy = policy
             return copy
         }
         
+        /// Cache lifetime in **seconds** (e.g. `300` = 5 min), not milliseconds.
+        /// Used when the server sends no cache headers (or `.ignoreServer`), and caps the age of an existing entry.
         public func ttl(_ ttl: TimeInterval) -> Request {
             var copy = self
             copy.ttl = ttl
             return copy
         }
 
+        /// `true`: if the network call fails and an expired cached entry exists, return it (`X-Cache: STALE`).
+        /// `false`: rethrow the network error.
         public func allowStaleOnError(_ allow: Bool) -> Request {
             var copy = self
             copy.allowStaleOnError = allow
             return copy
         }
 
+        /// `.respectServer`: expiry from the `Cache-Control` / `Expires` headers. `.ignoreServer`: always use the TTL.
         public func cacheControlBehavior(_ behavior: CachedURLSession.CacheControlBehavior) -> Request {
             var copy = self
             copy.cacheControlBehavior = behavior
             return copy
         }
 
+        /// Skips the cache read but still stores the fresh response.
         public func forceRefresh() -> Request {
             var copy = self
             copy.cachePolicy = .reloadIgnoringLocalCacheData
             return copy
         }
 
+        /// Never hits the network: returns a fresh cached entry or throws `URLError(.resourceUnavailable)`.
         public func cacheOnly() -> Request {
             var copy = self
             copy.cachePolicy = .returnCacheDataDontLoad
             return copy
         }
 
+        /// Skips the cache entirely: no read, no write.
         public func bypassCache() -> Request {
             var copy = self
             copy.isBypassCache = true
             return copy
         }
         
+        /// Executes the GET and returns raw data. Does not check the HTTP status code.
+        /// Check the `X-Cache` response header (`HIT`/`MISS`/`STALE`) to see where it came from.
         public func send() async throws -> (data: Data, urlResponse: URLResponse) {
             let _request = try Requester.buildRequest(self)
             return try await Requester.cachedSession.data(for: _request)
         }
         
+        /// Executes the GET and decodes the JSON body into `D`.
+        /// Throws `ErrorReason.generic(statusCode:)` for non-2xx; decoding failures trigger `assertionFailure` in debug.
         public func send<D: Decodable>() async throws -> D {
             let _request = try Requester.buildRequest(self)
             let (data, urlResponse) = try await Requester.cachedSession.data(for: _request)
@@ -142,6 +167,7 @@ extension Requester {
         }
     }
     
+    /// Starts a `Request` builder; chain modifiers, then call `.send()`.
     public static func makeRequest(_ urlString: String) -> Request {
         Request(urlString)
     }
@@ -162,6 +188,8 @@ extension Requester {
         return try buildRequest(request)
     }
     
+    /// Builds the GET `URLRequest` and stamps cache overrides as `URLProtocol` properties.
+    /// `CachedURLSession` reads them back by the same key strings.
     private static func buildRequest(_ request: Request) throws -> URLRequest {
         guard NetworkStatusMonitor.shared.hasConnection else {
             throw ErrorReason.noInternetConnection
@@ -226,8 +254,11 @@ extension Requester {
     
     public enum ErrorReason: Error {
         case dataCorrupted
+        /// The string passed is not a valid URL.
         case urlCreationFailed
+        /// `NetworkStatusMonitor` reports offline; thrown before any request or cache lookup.
         case noInternetConnection
+        /// Non-2xx HTTP status (only thrown by the decoding overloads).
         case generic(statusCode: Int)
     }
     

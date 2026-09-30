@@ -9,7 +9,10 @@ import Foundation
 import Network
 import Combine
 
+/// Singleton over `NWPathMonitor`; `Requester` checks `hasConnection` before every request.
+/// `onWifi`/`onCellular` reflect the latest path update.
 public final class NetworkStatusMonitor {
+    /// Emits `true`/`false` only when connectivity actually changes.
     public var statusChanged: AnyPublisher<Bool, Never> {
         networkStatus
             .removeDuplicates()
@@ -41,6 +44,7 @@ public final class NetworkStatusMonitor {
         pathMonitor.start(queue: monitorQueue)
     }
     
+    /// Calls the block on the main queue on each connectivity change; keep the returned cancellable alive.
     public static func networkStatusChangedSubscription(_ statusUpdatedBlock: @escaping (Bool) -> Void) -> AnyCancellable {
        return shared.statusChanged
            .receive(on: DispatchQueue.main)

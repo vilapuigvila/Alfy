@@ -8,6 +8,8 @@
 import Foundation
 import CryptoKit
 
+/// Disk + memory cache for GET requests over a `URLSession`, keyed by `sha256("GET <url>")`.
+/// Responses carry `X-Cache: HIT|MISS|STALE`; concurrent calls for one key share a single fetch.
 public actor CachedURLSession {
     
     private static let defaultCacheNamespace = "Alfy_CachedURLSession"
@@ -26,11 +28,15 @@ public actor CachedURLSession {
     }
 
     public struct Configuration {
+        /// Folder name under `Caches/` where entries are stored.
         public var cacheNamespace: String
         
+        /// Default cache lifetime in **seconds**.
         public var ttl: TimeInterval
         public var session: URLSession
+        /// Serve an expired entry when the network call fails.
         public var allowStaleOnError: Bool
+        /// Max responses kept in RAM (count, not bytes); the disk cache is not limited.
         public var maxMemoryEntries: Int
         public var cacheControlBehavior: CacheControlBehavior
 
@@ -78,11 +84,14 @@ public actor CachedURLSession {
         )
     }
     
+    /// `respectServer`: expiry from `Cache-Control`/`Expires` (TTL only as fallback; no-store/no-cache skips caching).
+    /// `ignoreServer`: always expire by the configured TTL.
     public enum CacheControlBehavior {
         case respectServer
         case ignoreServer
     }
 
+    /// Keys `Requester` sets on the `URLRequest`; the strings must match its `buildRequest`.
     private enum RequestPropertyKey {
         static let allowStaleOnError = "AlfyAllowStaleOnError"
         static let cacheControlBehavior = "AlfyCacheControlBehavior"
@@ -145,6 +154,8 @@ public actor CachedURLSession {
         return !isFresh(entry, requestTTL: nil)
     }
 
+    /// Bypass or non-GET goes straight to the network; otherwise serves a fresh entry per `cachePolicy`.
+    /// On a miss, fetches once per key (deduplicated) and stores the result.
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         if shouldBypassCache(for: request) {
             return try await session.data(for: request)
@@ -202,6 +213,8 @@ public actor CachedURLSession {
         return sha256("\(method) \(url.absoluteString)")
     }
 
+    /// Fetches, stores if cacheable, returns `MISS`.
+    /// On error, returns the old entry as `STALE` if `allowStaleOnError`, else rethrows.
     private func fetchAndCache(request: URLRequest, cacheKey: String) async throws -> (Data, URLResponse) {
         let effectiveAllowStaleOnError = allowStaleOnErrorOverride(for: request)
         let effectiveCacheControlBehavior = cacheControlBehaviorOverride(for: request)
