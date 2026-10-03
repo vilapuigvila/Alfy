@@ -101,6 +101,7 @@ public actor CachedURLSession {
         static let cacheControlBehavior = "AlfyCacheControlBehavior"
         static let bypassCache = "AlfyBypassCache"
         static let cacheTTL = "AlfyCacheTTL"
+        static let requestID = "AlfyRequestID"
     }
 
     private struct CacheEntry: Codable {
@@ -163,18 +164,21 @@ public actor CachedURLSession {
     /// Bypass or non-GET goes straight to the network; otherwise serves a fresh entry per `cachePolicy`.
     /// On a miss, fetches once per key (deduplicated) and stores the result.
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let id = requestID(for: request) ?? NetworkLogger.makeRequestID()
+        return try await NetworkLogger.$requestID.withValue(id) {
+            try await self.perform(request)
+        }
+    }
+
+    private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
         if shouldBypassCache(for: request) {
-            try requireConnection()
-            let result = try await session.data(for: request)
-            NetworkLogger.log(.internet)
-            return result
+            try requireConnection(for: request)
+            return try await loadFromNetwork(request)
         }
 
         guard let cacheKey = cacheKey(for: request) else {
-            try requireConnection()
-            let result = try await session.data(for: request)
-            NetworkLogger.log(.internet)
-            return result
+            try requireConnection(for: request)
+            return try await loadFromNetwork(request)
         }
 
         let requestTTL = ttlOverride(for: request)
@@ -233,13 +237,14 @@ public actor CachedURLSession {
 
         guard isOnline() else {
             if effectiveAllowStaleOnError, let stale = loadEntry(forKey: cacheKey) {
-                return cachedResult(from: stale, url: request.url, cacheState: "STALE")
+                return cachedResult(from: stale, url: request.url, cacheState: "STALE", staleCause: "offline")
             }
+            NetworkLogger.logOffline(url: request.url)
             throw Requester.ErrorReason.noInternetConnection
         }
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await loadFromNetwork(request)
             if let entry = makeCacheEntry(
                 request: request,
                 data: data,
@@ -248,18 +253,36 @@ public actor CachedURLSession {
             ) {
                 store(entry, forKey: cacheKey)
             }
-            NetworkLogger.log(.internet)
             return (data, withCacheHeader(response, cacheState: "MISS"))
         } catch {
             if effectiveAllowStaleOnError, let stale = loadEntry(forKey: cacheKey) {
-                return cachedResult(from: stale, url: request.url, cacheState: "STALE")
+                return cachedResult(
+                    from: stale,
+                    url: request.url,
+                    cacheState: "STALE",
+                    staleCause: NetworkLogger.describe(error)
+                )
             }
             throw error
         }
     }
 
-    private func requireConnection() throws {
+    /// Network fetch that logs source, URL and response summary (status, size, duration).
+    private func loadFromNetwork(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        let start = Date()
+        let result = try await session.data(for: request)
+        NetworkLogger.log(.internet, url: request.url)
+        NetworkLogger.logResponse(
+            status: (result.1 as? HTTPURLResponse)?.statusCode,
+            bytes: result.0.count,
+            duration: Date().timeIntervalSince(start)
+        )
+        return result
+    }
+
+    private func requireConnection(for request: URLRequest) throws {
         guard isOnline() else {
+            NetworkLogger.logOffline(url: request.url)
             throw Requester.ErrorReason.noInternetConnection
         }
     }
@@ -278,7 +301,12 @@ public actor CachedURLSession {
         return now < entry.storedAt.addingTimeInterval(requestTTL)
     }
 
-    private func cachedResult(from entry: CacheEntry, url: URL?, cacheState: String) -> (Data, URLResponse) {
+    private func cachedResult(
+        from entry: CacheEntry,
+        url: URL?,
+        cacheState: String,
+        staleCause: String? = nil
+    ) -> (Data, URLResponse) {
         let responseURL = url ?? URL(string: "about:blank")!
         var headers = entry.headers
         headers["X-Cache"] = cacheState
@@ -300,7 +328,14 @@ public actor CachedURLSession {
             expectedContentLength: entry.data.count,
             textEncodingName: entry.textEncodingName
         )
-        NetworkLogger.log(cacheState == "STALE" ? .staleCache : .cache)
+        NetworkLogger.log(cacheState == "STALE" ? .staleCache : .cache, url: responseURL)
+        NetworkLogger.logCacheEntry(
+            age: Date().timeIntervalSince(entry.storedAt),
+            expiresIn: entry.expiresAt.timeIntervalSinceNow
+        )
+        if let staleCause {
+            NetworkLogger.logStaleCause(staleCause)
+        }
         return (entry.data, response)
     }
 
@@ -327,8 +362,14 @@ public actor CachedURLSession {
         response: URLResponse,
         cacheControlBehavior: CacheControlBehavior
     ) -> CacheEntry? {
-        guard let http = response as? HTTPURLResponse else { return nil }
-        guard (200...299).contains(http.statusCode) else { return nil }
+        guard let http = response as? HTTPURLResponse else {
+            NetworkLogger.logNotCached(reason: "non-HTTP response")
+            return nil
+        }
+        guard (200...299).contains(http.statusCode) else {
+            NetworkLogger.logNotCached(reason: "status \(http.statusCode)")
+            return nil
+        }
 
         let storedAt = Date()
         guard let expiresAt = expirationDate(
@@ -367,6 +408,7 @@ public actor CachedURLSession {
         if cacheControlBehavior == .respectServer {
             let cacheControl = headerValue(named: "Cache-Control", in: response)
             if let cacheControl, cacheControlLowercasedContainsNoStoreOrNoCache(cacheControl) {
+                NetworkLogger.logNotCached(reason: "Cache-Control \(cacheControl)")
                 return nil
             }
 
@@ -381,7 +423,10 @@ public actor CachedURLSession {
             }
         }
 
-        guard fallbackTTL > 0 else { return nil }
+        guard fallbackTTL > 0 else {
+            NetworkLogger.logNotCached(reason: "ttl is \(Int(fallbackTTL))s and no usable cache headers")
+            return nil
+        }
         return storedAt.addingTimeInterval(fallbackTTL)
     }
 
@@ -508,6 +553,13 @@ public actor CachedURLSession {
             forKey: RequestPropertyKey.cacheTTL,
             in: request
         ) as? TimeInterval
+    }
+
+    private func requestID(for request: URLRequest) -> String? {
+        URLProtocol.property(
+            forKey: RequestPropertyKey.requestID,
+            in: request
+        ) as? String
     }
 
     private func shouldBypassCache(for request: URLRequest) -> Bool {

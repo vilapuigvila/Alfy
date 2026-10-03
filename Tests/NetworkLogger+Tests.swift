@@ -6,19 +6,20 @@
 //
 
 import XCTest
+import os
 @testable import Alfy
 
 final class NetworkLoggerTests: XCTestCase {
     private let namespace = "Alfy_NetworkLogger_Tests"
     private let lines = LogLines()
-    private var originalOutput: (@Sendable (String) -> Void)!
+    private var originalOutput: (@Sendable (OSLogType, String) -> Void)!
 
     override func setUp() {
         super.setUp()
         originalOutput = NetworkLogger.output
         NetworkLogger.isEnabled = true
         let captured = lines
-        NetworkLogger.output = { captured.append($0) }
+        NetworkLogger.output = { level, line in captured.append(level, line) }
         Self.removeDiskCache(namespace: namespace)
     }
 
@@ -30,26 +31,62 @@ final class NetworkLoggerTests: XCTestCase {
     }
 
     func testSourceMessages() {
-        XCTAssertEqual(NetworkLogger.Source.internet.message, "[NETWORK] - data from internet")
-        XCTAssertEqual(NetworkLogger.Source.cache.message, "[NETWORK] - data from cache")
-        XCTAssertEqual(NetworkLogger.Source.staleCache.message, "[NETWORK] - data from cache (stale)")
+        XCTAssertEqual(NetworkLogger.Source.internet.message, "data from internet")
+        XCTAssertEqual(NetworkLogger.Source.cache.message, "data from cache")
+        XCTAssertEqual(NetworkLogger.Source.staleCache.message, "data from cache (stale)")
     }
 
     func testInternetThenCacheThenStaleMapToMessages() async throws {
         let url = URL(string: "https://example.com/logger")!
         let online = LogLines.Flag(true)
         let session = makeSession(isOnline: { online.value })
+        let urlLine = "[NETWORK] - url: https://example.com/logger"
 
         _ = try await session.data(from: url)
-        XCTAssertEqual(lines.all, ["[NETWORK] - data from internet"])
+        XCTAssertEqual(lines.all.count, 3)
+        XCTAssertEqual(Array(lines.all.prefix(2)), ["[NETWORK] - data from internet", urlLine])
+        XCTAssertTrue(lines.all[2].hasPrefix("[NETWORK] - response: status 200 · "))
+        XCTAssertTrue(lines.all[2].hasSuffix(" ms"))
 
         _ = try await session.data(from: url)
-        XCTAssertEqual(lines.all.last, "[NETWORK] - data from cache")
+        XCTAssertEqual(Array(lines.all[3...4]), ["[NETWORK] - data from cache", urlLine])
+        XCTAssertTrue(lines.all[5].hasPrefix("[NETWORK] - cache: age 0s · expires in "))
+        XCTAssertEqual(lines.all.count, 6)
 
         online.value = false
         _ = try await session.data(for: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
-        XCTAssertEqual(lines.all.last, "[NETWORK] - data from cache (stale)")
-        XCTAssertEqual(lines.all.count, 3)
+        XCTAssertEqual(Array(lines.all[6...7]), ["[NETWORK] - data from cache (stale)", urlLine])
+        XCTAssertTrue(lines.all[8].hasPrefix("[NETWORK] - cache: age "))
+        XCTAssertEqual(lines.all[9], "[NETWORK] - stale served after: offline")
+        XCTAssertEqual(lines.all.count, 10)
+    }
+
+    func testOfflineWithNothingCachedLogsBlocked() async {
+        let session = makeSession(isOnline: { false })
+        let url = URL(string: "https://example.com/blocked")!
+
+        do {
+            _ = try await session.data(from: url)
+            XCTFail("expected noInternetConnection")
+        } catch {
+            XCTAssertEqual(
+                lines.all,
+                ["[NETWORK] - blocked: offline", "[NETWORK] - url: https://example.com/blocked"]
+            )
+        }
+    }
+
+    func testResponseThatIsNotStoredLogsReason() async throws {
+        let session = makeSession(isOnline: { true }, ttl: 0, behavior: .ignoreServer)
+
+        _ = try await session.data(from: URL(string: "https://example.com/uncached")!)
+
+        XCTAssertEqual(lines.all.count, 4)
+        XCTAssertEqual(lines.all[3], "[NETWORK] - not cached: ttl is 0s and no usable cache headers")
+    }
+
+    func testStaleAfterNetworkErrorLogsErrorCode() {
+        XCTAssertEqual(NetworkLogger.describe(URLError(.notConnectedToInternet)), "URLError -1009")
     }
 
     func testDisabledSwitchStopsOutput() async throws {
@@ -59,26 +96,75 @@ final class NetworkLoggerTests: XCTestCase {
 
         _ = try await session.data(from: url)
         _ = try await session.data(from: url)
-        NetworkLogger.logHeaders(["A": "B"])
+        NetworkLogger.logHeaders(["A": "B"], url: nil)
 
         XCTAssertTrue(lines.all.isEmpty)
     }
 
     func testHeadersLineUsesNetworkPrefix() {
-        NetworkLogger.logHeaders(["A": "B"])
-        XCTAssertEqual(lines.all.count, 1)
-        XCTAssertTrue(lines.all[0].hasPrefix("[NETWORK] - headers: "))
+        NetworkLogger.logHeaders(["A": "B"], url: URL(string: "https://example.com/h"), requestID: "ab12")
+        XCTAssertEqual(lines.raw.count, 2)
+        XCTAssertTrue(lines.raw[0].hasPrefix("[NETWORK #ab12] - headers: "))
+        XCTAssertEqual(lines.raw[1], "[NETWORK #ab12] - url: https://example.com/h")
+        XCTAssertEqual(lines.levels, [.debug, .debug])
     }
 
-    private func makeSession(isOnline: @escaping @Sendable () -> Bool) -> CachedURLSession {
+    func testLinesWithoutRequestUseBarePrefix() {
+        NetworkLogger.logNotCached(reason: "x")
+        XCTAssertEqual(lines.raw, ["[NETWORK] - not cached: x"])
+    }
+
+    func testEveryLineOfOneRequestSharesItsIDAndRequestsDiffer() async throws {
+        let session = makeSession(isOnline: { true })
+
+        _ = try await session.data(from: URL(string: "https://example.com/a")!)
+        let firstIDs = Set(lines.raw.map(Self.id(of:)))
+        XCTAssertEqual(firstIDs.count, 1)
+
+        _ = try await session.data(from: URL(string: "https://example.com/b")!)
+        let allIDs = Set(lines.raw.map(Self.id(of:)))
+        XCTAssertEqual(allIDs.count, 2)
+    }
+
+    func testLevelsMatchSeverity() async throws {
+        let online = LogLines.Flag(true)
+        let session = makeSession(isOnline: { online.value })
+        let url = URL(string: "https://example.com/levels")!
+
+        _ = try await session.data(from: url)
+        XCTAssertEqual(lines.levels, [.info, .info, .info])
+
+        online.value = false
+        let blockedURL = URL(string: "https://example.com/levels-blocked")!
+        _ = try? await session.data(from: blockedURL)
+        XCTAssertEqual(Array(lines.levels.suffix(2)), [.error, .error])
+    }
+
+    func testFailureStatusIsLoggedAsError() {
+        NetworkLogger.logResponse(status: 404, bytes: 0, duration: 0.01)
+        NetworkLogger.logResponse(status: 200, bytes: 0, duration: 0.01)
+        XCTAssertEqual(lines.levels, [.error, .info])
+    }
+
+    private static func id(of line: String) -> String {
+        guard let start = line.range(of: "#"), let end = line.range(of: "]") else { return "" }
+        return String(line[start.upperBound..<end.lowerBound])
+    }
+
+    private func makeSession(
+        isOnline: @escaping @Sendable () -> Bool,
+        ttl: TimeInterval = 60,
+        behavior: CachedURLSession.CacheControlBehavior = .respectServer
+    ) -> CachedURLSession {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [LoggerStubProtocol.self]
         return CachedURLSession(
             configuration: .init(
-                ttl: 60,
+                ttl: ttl,
                 session: URLSession(configuration: config),
                 allowStaleOnError: true,
                 cacheNamespace: namespace,
+                cacheControlBehavior: behavior,
                 isOnline: isOnline
             )
         )
@@ -107,18 +193,30 @@ private final class LogLines: @unchecked Sendable {
     }
 
     private let lock = NSLock()
-    private var storage: [String] = []
+    private var storage: [(OSLogType, String)] = []
 
-    func append(_ line: String) {
+    func append(_ level: OSLogType, _ line: String) {
         lock.lock()
-        storage.append(line)
+        storage.append((level, line))
         lock.unlock()
     }
 
-    var all: [String] {
+    /// Lines exactly as written, including the `#id`.
+    var raw: [String] {
         lock.lock()
         defer { lock.unlock() }
-        return storage
+        return storage.map(\.1)
+    }
+
+    var levels: [OSLogType] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage.map(\.0)
+    }
+
+    /// Lines with the `#id` removed, so tests can compare against fixed text.
+    var all: [String] {
+        raw.map { $0.replacingOccurrences(of: #" #[0-9a-f]{4}\]"#, with: "]", options: .regularExpression) }
     }
 }
 

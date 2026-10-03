@@ -236,7 +236,9 @@ extension Requester {
             )
         }
         
-        NetworkLogger.logHeaders(urlRequest.allHTTPHeaderFields)
+        let requestID = NetworkLogger.makeRequestID()
+        URLProtocol.setProperty(requestID, forKey: "AlfyRequestID", in: urlRequest)
+        NetworkLogger.logHeaders(urlRequest.allHTTPHeaderFields, url: url, requestID: requestID)
         return urlRequest as URLRequest
     }
     
