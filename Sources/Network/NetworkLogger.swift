@@ -12,7 +12,8 @@ import os
 /// Set `isEnabled = false` to silence all of it.
 ///
 /// Every line of one request shares a short id (`[NETWORK #a3f9]`) so concurrent requests can be told apart.
-/// Levels: `.info` for sources and summaries, `.debug` for headers, `.error` for failures (offline, 4xx/5xx, stale after error).
+/// Levels: `.default` for sources and summaries (shown and saved without extra settings), `.debug` for headers,
+/// `.error` for failures (offline, 4xx/5xx, stale after error). Avoid `.info`: Console hides it and the system does not save it.
 public enum NetworkLogger {
     public static var isEnabled: Bool = true
 
@@ -49,8 +50,8 @@ public enum NetworkLogger {
 
     /// Writes the source line, then a second line with the URL that performed the request.
     static func log(_ source: Source, url: URL?) {
-        write(.info, source.message)
-        write(.info, "url: \(url?.absoluteString ?? "unknown")")
+        write(.default, source.message)
+        write(.default, "url: \(url?.absoluteString ?? "unknown")")
     }
 
     /// `status 200 · 12.4 KB · 183 ms`; status is `-` for non-HTTP responses. `.error` for 4xx/5xx.
@@ -58,7 +59,7 @@ public enum NetworkLogger {
         let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
         let isFailure = (status ?? 0) >= 400
         write(
-            isFailure ? .error : .info,
+            isFailure ? .error : .default,
             "response: status \(status.map(String.init) ?? "-") · \(size) · \(Int(duration * 1000)) ms"
         )
     }
@@ -66,12 +67,12 @@ public enum NetworkLogger {
     /// `age 42s · expires in 78s`, or `expired 12s ago` for an entry past its expiry.
     static func logCacheEntry(age: TimeInterval, expiresIn: TimeInterval) {
         let expiry = expiresIn >= 0 ? "expires in \(Int(expiresIn))s" : "expired \(Int(-expiresIn))s ago"
-        write(.info, "cache: age \(Int(age))s · \(expiry)")
+        write(.default, "cache: age \(Int(age))s · \(expiry)")
     }
 
     /// Why a network response was not written to the cache.
     static func logNotCached(reason: String) {
-        write(.info, "not cached: \(reason)")
+        write(.default, "not cached: \(reason)")
     }
 
     /// The request was rejected because the device is offline and nothing usable is cached.

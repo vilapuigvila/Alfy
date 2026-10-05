@@ -132,7 +132,7 @@ final class NetworkLoggerTests: XCTestCase {
         let url = URL(string: "https://example.com/levels")!
 
         _ = try await session.data(from: url)
-        XCTAssertEqual(lines.levels, [.info, .info, .info])
+        XCTAssertEqual(lines.levels, [.default, .default, .default])
 
         online.value = false
         let blockedURL = URL(string: "https://example.com/levels-blocked")!
@@ -143,7 +143,7 @@ final class NetworkLoggerTests: XCTestCase {
     func testFailureStatusIsLoggedAsError() {
         NetworkLogger.logResponse(status: 404, bytes: 0, duration: 0.01)
         NetworkLogger.logResponse(status: 200, bytes: 0, duration: 0.01)
-        XCTAssertEqual(lines.levels, [.error, .info])
+        XCTAssertEqual(lines.levels, [.error, .default])
     }
 
     private static func id(of line: String) -> String {
