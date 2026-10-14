@@ -107,11 +107,12 @@ final class NetworkLoggerTests: XCTestCase {
         XCTAssertTrue(lines.raw[0].hasPrefix("[NETWORK #ab12] - headers: "))
         XCTAssertEqual(lines.raw[1], "[NETWORK #ab12] - url: https://example.com/h")
         XCTAssertEqual(lines.levels, [.debug, .debug])
+        NetworkLogger.endRequest("ab12")
     }
 
     func testLinesWithoutRequestUseBarePrefix() {
-        NetworkLogger.logNotCached(reason: "x")
-        XCTAssertEqual(lines.raw, ["[NETWORK] - not cached: x"])
+        NetworkLogger.logNotCached(reason: "x", url: nil)
+        XCTAssertEqual(lines.raw, ["[NETWORK] - not cached: x", "[NETWORK] - url: unknown"])
     }
 
     func testEveryLineOfOneRequestSharesItsIDAndRequestsDiffer() async throws {
@@ -140,10 +141,41 @@ final class NetworkLoggerTests: XCTestCase {
         XCTAssertEqual(Array(lines.levels.suffix(2)), [.error, .error])
     }
 
+    func testURLIsWrittenOncePerRequest() {
+        let url = URL(string: "https://example.com/once")
+        NetworkLogger.$requestID.withValue("ef56") {
+            NetworkLogger.logResponse(status: 500, bytes: 0, duration: 0.01, url: url)
+            NetworkLogger.logCacheEntry(age: 1, expiresIn: 1, url: url)
+            NetworkLogger.logNotCached(reason: "x", url: url)
+            NetworkLogger.logStaleCause("offline", url: url)
+        }
+        NetworkLogger.endRequest("ef56")
+
+        XCTAssertEqual(lines.all.filter { $0.hasPrefix("[NETWORK] - url: ") }.count, 1)
+        XCTAssertEqual(lines.all.count, 5)
+    }
+
+    func testRequesterHeadersAndSessionShareOneURLLine() async throws {
+        let session = makeSession(isOnline: { true })
+        let url = URL(string: "https://example.com/shared")!
+        NetworkLogger.logHeaders(nil, url: url, requestID: "cd34")
+
+        let request = NSMutableURLRequest(url: url)
+        URLProtocol.setProperty("cd34", forKey: "AlfyRequestID", in: request)
+        _ = try await session.data(for: request as URLRequest)
+
+        let urlLines = lines.all.filter { $0.hasPrefix("[NETWORK] - url: ") }
+        XCTAssertEqual(urlLines.count, 1)
+        XCTAssertTrue(lines.raw.allSatisfy { $0.hasPrefix("[NETWORK #cd34]") })
+    }
+
     func testFailureStatusIsLoggedAsError() {
-        NetworkLogger.logResponse(status: 404, bytes: 0, duration: 0.01)
-        NetworkLogger.logResponse(status: 200, bytes: 0, duration: 0.01)
-        XCTAssertEqual(lines.levels, [.error, .default])
+        let url = URL(string: "https://example.com/status")
+        NetworkLogger.logResponse(status: 404, bytes: 0, duration: 0.01, url: url)
+        NetworkLogger.logResponse(status: 200, bytes: 0, duration: 0.01, url: url)
+        XCTAssertEqual(lines.levels, [.error, .error, .default, .default])
+        XCTAssertEqual(lines.all[1], "[NETWORK] - url: https://example.com/status")
+        XCTAssertEqual(lines.all[3], "[NETWORK] - url: https://example.com/status")
     }
 
     private static func id(of line: String) -> String {

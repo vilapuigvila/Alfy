@@ -165,6 +165,7 @@ public actor CachedURLSession {
     /// On a miss, fetches once per key (deduplicated) and stores the result.
     public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let id = requestID(for: request) ?? NetworkLogger.makeRequestID()
+        defer { NetworkLogger.endRequest(id) }
         return try await NetworkLogger.$requestID.withValue(id) {
             try await self.perform(request)
         }
@@ -275,7 +276,8 @@ public actor CachedURLSession {
         NetworkLogger.logResponse(
             status: (result.1 as? HTTPURLResponse)?.statusCode,
             bytes: result.0.count,
-            duration: Date().timeIntervalSince(start)
+            duration: Date().timeIntervalSince(start),
+            url: request.url
         )
         return result
     }
@@ -331,10 +333,11 @@ public actor CachedURLSession {
         NetworkLogger.log(cacheState == "STALE" ? .staleCache : .cache, url: responseURL)
         NetworkLogger.logCacheEntry(
             age: Date().timeIntervalSince(entry.storedAt),
-            expiresIn: entry.expiresAt.timeIntervalSinceNow
+            expiresIn: entry.expiresAt.timeIntervalSinceNow,
+            url: url
         )
         if let staleCause {
-            NetworkLogger.logStaleCause(staleCause)
+            NetworkLogger.logStaleCause(staleCause, url: url)
         }
         return (entry.data, response)
     }
@@ -363,11 +366,11 @@ public actor CachedURLSession {
         cacheControlBehavior: CacheControlBehavior
     ) -> CacheEntry? {
         guard let http = response as? HTTPURLResponse else {
-            NetworkLogger.logNotCached(reason: "non-HTTP response")
+            NetworkLogger.logNotCached(reason: "non-HTTP response", url: request.url)
             return nil
         }
         guard (200...299).contains(http.statusCode) else {
-            NetworkLogger.logNotCached(reason: "status \(http.statusCode)")
+            NetworkLogger.logNotCached(reason: "status \(http.statusCode)", url: request.url)
             return nil
         }
 
@@ -376,7 +379,8 @@ public actor CachedURLSession {
             for: http,
             storedAt: storedAt,
             fallbackTTL: ttlOverride(for: request) ?? defaultTTL,
-            cacheControlBehavior: cacheControlBehavior
+            cacheControlBehavior: cacheControlBehavior,
+            url: request.url
         ) else {
             return nil
         }
@@ -403,12 +407,13 @@ public actor CachedURLSession {
         for response: HTTPURLResponse,
         storedAt: Date,
         fallbackTTL: TimeInterval,
-        cacheControlBehavior: CacheControlBehavior
+        cacheControlBehavior: CacheControlBehavior,
+        url: URL?
     ) -> Date? {
         if cacheControlBehavior == .respectServer {
             let cacheControl = headerValue(named: "Cache-Control", in: response)
             if let cacheControl, cacheControlLowercasedContainsNoStoreOrNoCache(cacheControl) {
-                NetworkLogger.logNotCached(reason: "Cache-Control \(cacheControl)")
+                NetworkLogger.logNotCached(reason: "Cache-Control \(cacheControl)", url: url)
                 return nil
             }
 
@@ -424,7 +429,7 @@ public actor CachedURLSession {
         }
 
         guard fallbackTTL > 0 else {
-            NetworkLogger.logNotCached(reason: "ttl is \(Int(fallbackTTL))s and no usable cache headers")
+            NetworkLogger.logNotCached(reason: "ttl is \(Int(fallbackTTL))s and no usable cache headers", url: url)
             return nil
         }
         return storedAt.addingTimeInterval(fallbackTTL)

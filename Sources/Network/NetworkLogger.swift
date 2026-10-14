@@ -51,39 +51,45 @@ public enum NetworkLogger {
     /// Writes the source line, then a second line with the URL that performed the request.
     static func log(_ source: Source, url: URL?) {
         write(.default, source.message)
-        write(.default, "url: \(url?.absoluteString ?? "unknown")")
+        writeURL(url)
     }
 
     /// `status 200 · 12.4 KB · 183 ms`; status is `-` for non-HTTP responses. `.error` for 4xx/5xx.
-    static func logResponse(status: Int?, bytes: Int, duration: TimeInterval) {
+    /// Followed by the URL, at the same level.
+    static func logResponse(status: Int?, bytes: Int, duration: TimeInterval, url: URL?) {
         let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
         let isFailure = (status ?? 0) >= 400
+        let level: OSLogType = isFailure ? .error : .default
         write(
-            isFailure ? .error : .default,
+            level,
             "response: status \(status.map(String.init) ?? "-") · \(size) · \(Int(duration * 1000)) ms"
         )
+        writeURL(url, level)
     }
 
-    /// `age 42s · expires in 78s`, or `expired 12s ago` for an entry past its expiry.
-    static func logCacheEntry(age: TimeInterval, expiresIn: TimeInterval) {
+    /// `age 42s · expires in 78s`, or `expired 12s ago` for an entry past its expiry. Followed by the URL.
+    static func logCacheEntry(age: TimeInterval, expiresIn: TimeInterval, url: URL?) {
         let expiry = expiresIn >= 0 ? "expires in \(Int(expiresIn))s" : "expired \(Int(-expiresIn))s ago"
         write(.default, "cache: age \(Int(age))s · \(expiry)")
+        writeURL(url)
     }
 
-    /// Why a network response was not written to the cache.
-    static func logNotCached(reason: String) {
+    /// Why a network response was not written to the cache. Followed by the URL.
+    static func logNotCached(reason: String, url: URL?) {
         write(.default, "not cached: \(reason)")
+        writeURL(url)
     }
 
     /// The request was rejected because the device is offline and nothing usable is cached.
     static func logOffline(url: URL?) {
         write(.error, "blocked: offline")
-        write(.error, "url: \(url?.absoluteString ?? "unknown")")
+        writeURL(url, .error)
     }
 
-    /// Why a stale entry was served: `offline` or the network error text.
-    static func logStaleCause(_ cause: String) {
+    /// Why a stale entry was served: `offline` or the network error text. Followed by the URL.
+    static func logStaleCause(_ cause: String, url: URL?) {
         write(.error, "stale served after: \(cause)")
+        writeURL(url, .error)
     }
 
     static func describe(_ error: Error) -> String {
@@ -98,8 +104,34 @@ public enum NetworkLogger {
     static func logHeaders(_ headers: [String: String]?, url: URL?, requestID: String? = nil) {
         $requestID.withValue(requestID ?? Self.requestID) {
             write(.debug, "headers: \(String(describing: headers))")
-            write(.debug, "url: \(url?.absoluteString ?? "unknown")")
+            writeURL(url, .debug)
         }
+    }
+
+    /// Writes the URL line once per request: the first call with a request id wins, later ones are skipped.
+    /// Outside a request (no id) it always writes.
+    private static func writeURL(_ url: URL?, _ level: OSLogType = .default) {
+        guard isEnabled else { return }
+        if let id = requestID, !markURLWritten(for: id) { return }
+        write(level, "url: \(url?.absoluteString ?? "unknown")")
+    }
+
+    private static let urlLock = NSLock()
+    /// Request ids whose URL line has already been written. Entries are removed by `endRequest`.
+    private static var urlWrittenIDs: Set<String> = []
+
+    /// Returns `true` the first time it is called for `id`.
+    private static func markURLWritten(for id: String) -> Bool {
+        urlLock.lock()
+        defer { urlLock.unlock() }
+        return urlWrittenIDs.insert(id).inserted
+    }
+
+    /// Called when the session has finished a request, so its id can be forgotten.
+    static func endRequest(_ id: String) {
+        urlLock.lock()
+        defer { urlLock.unlock() }
+        urlWrittenIDs.remove(id)
     }
 
     private static func write(_ level: OSLogType, _ message: String) {
