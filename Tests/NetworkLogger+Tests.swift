@@ -31,34 +31,32 @@ final class NetworkLoggerTests: XCTestCase {
     }
 
     func testSourceMessages() {
-        XCTAssertEqual(NetworkLogger.Source.internet.message, "data from internet")
-        XCTAssertEqual(NetworkLogger.Source.cache.message, "data from cache")
-        XCTAssertEqual(NetworkLogger.Source.staleCache.message, "data from cache (stale)")
+        XCTAssertEqual(NetworkLogger.Source.internet.message, "network")
+        XCTAssertEqual(NetworkLogger.Source.cache.message, "cache")
+        XCTAssertEqual(NetworkLogger.Source.staleCache.message, "cache (stale)")
     }
 
     func testInternetThenCacheThenStaleMapToMessages() async throws {
         let url = URL(string: "https://example.com/logger")!
         let online = LogLines.Flag(true)
         let session = makeSession(isOnline: { online.value })
-        let urlLine = "[NETWORK] - url: https://example.com/logger"
+        _ = try await session.data(from: url)
+        XCTAssertEqual(lines.all.count, 2)
+        XCTAssertEqual(lines.all[0], "[NETWORK] - url: https://example.com/logger - network")
+        XCTAssertTrue(lines.all[1].hasPrefix("[NETWORK] - response: status 200 · "))
+        XCTAssertTrue(lines.all[1].hasSuffix(" ms"))
 
         _ = try await session.data(from: url)
-        XCTAssertEqual(lines.all.count, 3)
-        XCTAssertEqual(Array(lines.all.prefix(2)), ["[NETWORK] - data from internet", urlLine])
-        XCTAssertTrue(lines.all[2].hasPrefix("[NETWORK] - response: status 200 · "))
-        XCTAssertTrue(lines.all[2].hasSuffix(" ms"))
-
-        _ = try await session.data(from: url)
-        XCTAssertEqual(Array(lines.all[3...4]), ["[NETWORK] - data from cache", urlLine])
-        XCTAssertTrue(lines.all[5].hasPrefix("[NETWORK] - cache: age 0s · expires in "))
-        XCTAssertEqual(lines.all.count, 6)
+        XCTAssertEqual(lines.all[2], "[NETWORK] - url: https://example.com/logger - cache")
+        XCTAssertTrue(lines.all[3].hasPrefix("[NETWORK] - cache: age 0s · expires in "))
+        XCTAssertEqual(lines.all.count, 4)
 
         online.value = false
         _ = try await session.data(for: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
-        XCTAssertEqual(Array(lines.all[6...7]), ["[NETWORK] - data from cache (stale)", urlLine])
-        XCTAssertTrue(lines.all[8].hasPrefix("[NETWORK] - cache: age "))
-        XCTAssertEqual(lines.all[9], "[NETWORK] - stale served after: offline")
-        XCTAssertEqual(lines.all.count, 10)
+        XCTAssertEqual(lines.all[4], "[NETWORK] - url: https://example.com/logger - cache (stale)")
+        XCTAssertTrue(lines.all[5].hasPrefix("[NETWORK] - cache: age "))
+        XCTAssertEqual(lines.all[6], "[NETWORK] - stale served after: offline")
+        XCTAssertEqual(lines.all.count, 7)
     }
 
     func testOfflineWithNothingCachedLogsBlocked() async {
@@ -81,8 +79,8 @@ final class NetworkLoggerTests: XCTestCase {
 
         _ = try await session.data(from: URL(string: "https://example.com/uncached")!)
 
-        XCTAssertEqual(lines.all.count, 4)
-        XCTAssertEqual(lines.all[3], "[NETWORK] - not cached: ttl is 0s and no usable cache headers")
+        XCTAssertEqual(lines.all.count, 3)
+        XCTAssertEqual(lines.all[2], "[NETWORK] - not cached: ttl is 0s and no usable cache headers")
     }
 
     func testStaleAfterNetworkErrorLogsErrorCode() {
@@ -133,7 +131,7 @@ final class NetworkLoggerTests: XCTestCase {
         let url = URL(string: "https://example.com/levels")!
 
         _ = try await session.data(from: url)
-        XCTAssertEqual(lines.levels, [.default, .default, .default])
+        XCTAssertEqual(lines.levels, [.default, .default])
 
         online.value = false
         let blockedURL = URL(string: "https://example.com/levels-blocked")!

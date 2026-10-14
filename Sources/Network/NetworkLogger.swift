@@ -29,9 +29,9 @@ public enum NetworkLogger {
 
         var message: String {
             switch self {
-            case .internet: return "data from internet"
-            case .cache: return "data from cache"
-            case .staleCache: return "data from cache (stale)"
+            case .internet: return "network"
+            case .cache: return "cache"
+            case .staleCache: return "cache (stale)"
             }
         }
     }
@@ -48,10 +48,9 @@ public enum NetworkLogger {
         String(UUID().uuidString.prefix(4)).lowercased()
     }
 
-    /// Writes the source line, then a second line with the URL that performed the request.
+    /// Writes one line: `url: <url> - network|cache|cache (stale)`. The URL part is dropped if it was already written for this request.
     static func log(_ source: Source, url: URL?) {
-        write(.default, source.message)
-        writeURL(url)
+        write(.default, "\(urlPrefix(url))\(source.message)")
     }
 
     /// `status 200 · 12.4 KB · 183 ms`; status is `-` for non-HTTP responses. `.error` for 4xx/5xx.
@@ -111,9 +110,16 @@ public enum NetworkLogger {
     /// Writes the URL line once per request: the first call with a request id wins, later ones are skipped.
     /// Outside a request (no id) it always writes.
     private static func writeURL(_ url: URL?, _ level: OSLogType = .default) {
-        guard isEnabled else { return }
-        if let id = requestID, !markURLWritten(for: id) { return }
+        let prefix = urlPrefix(url)
+        guard !prefix.isEmpty else { return }
         write(level, "url: \(url?.absoluteString ?? "unknown")")
+    }
+
+    /// `url: <url> - ` the first time this request asks, otherwise empty.
+    private static func urlPrefix(_ url: URL?) -> String {
+        guard isEnabled else { return "" }
+        if let id = requestID, !markURLWritten(for: id) { return "" }
+        return "url: \(url?.absoluteString ?? "unknown") - "
     }
 
     private static let urlLock = NSLock()
