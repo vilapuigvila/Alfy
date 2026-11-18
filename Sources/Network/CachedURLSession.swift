@@ -31,8 +31,8 @@ public actor CachedURLSession {
         /// Folder name under `Caches/` where entries are stored.
         public var cacheNamespace: String
         
-        /// Default cache lifetime in **seconds**.
-        public var ttl: TimeInterval
+        /// Default cache lifetime.
+        public var ttl: TTL
         public var session: URLSession
         /// Serve an expired entry when the network call fails.
         public var allowStaleOnError: Bool
@@ -43,7 +43,7 @@ public actor CachedURLSession {
         public var isOnline: @Sendable () -> Bool
 
         public init(
-            ttl: TimeInterval = 120,
+            ttl: TTL = .minutes(2),
             session: URLSession = .shared,
             allowStaleOnError: Bool = true,
             maxMemoryEntries: Int = 64,
@@ -69,7 +69,7 @@ public actor CachedURLSession {
     }
 
     public static func configure(
-        ttl: TimeInterval = 180,
+        ttl: TTL = .minutes(3),
         session: URLSession = .shared,
         allowStaleOnError: Bool = true,
         maxMemoryEntries: Int = 64,
@@ -126,7 +126,7 @@ public actor CachedURLSession {
     private var inflight: [String: Task<(Data, URLResponse), Error>] = [:]
 
     public init(configuration: Configuration) {
-        self.defaultTTL = configuration.ttl
+        self.defaultTTL = configuration.ttl.seconds
         self.session = configuration.session
         self.allowStaleOnError = configuration.allowStaleOnError
         self.maxMemoryEntries = configuration.maxMemoryEntries

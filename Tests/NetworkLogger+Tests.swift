@@ -190,7 +190,7 @@ final class NetworkLoggerTests: XCTestCase {
         config.protocolClasses = [LoggerStubProtocol.self]
         return CachedURLSession(
             configuration: .init(
-                ttl: ttl,
+                ttl: .init(uncheckedSeconds: ttl),
                 session: URLSession(configuration: config),
                 allowStaleOnError: true,
                 cacheNamespace: namespace,

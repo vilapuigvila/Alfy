@@ -21,10 +21,10 @@ public struct Requester {
         CachedURLSession.configure(configuration)
     }
     
-    /// Same as the `Configuration` overload. `ttl` is in **seconds**; `maxMemoryEntries` is a count of responses.
+    /// Same as the `Configuration` overload. `maxMemoryEntries` is a count of responses.
     /// `cacheNamespace` is the folder name under `Caches/`.
     public static func configureCache(
-        ttl: TimeInterval = 180,
+        ttl: CachedURLSession.TTL = .minutes(3),
         session: URLSession = .shared,
         allowStaleOnError: Bool = true,
         maxMemoryEntries: Int = 64,
@@ -71,7 +71,7 @@ extension Requester {
         public let urlString: String
         public var headers: [HeaderParam]
         public var cachePolicy: URLRequest.CachePolicy?
-        public var ttl: TimeInterval?
+        public var ttl: CachedURLSession.TTL?
         public var timeout: TimeInterval?
         public var allowStaleOnError: Bool?
         public var cacheControlBehavior: CachedURLSession.CacheControlBehavior?
@@ -110,9 +110,9 @@ extension Requester {
             return copy
         }
         
-        /// Cache lifetime in **seconds** (e.g. `300` = 5 min), not milliseconds.
+        /// Cache lifetime with an explicit unit, e.g. `.minutes(5)`.
         /// Used when the server sends no cache headers (or `.ignoreServer`), and caps the age of an existing entry.
-        public func ttl(_ ttl: TimeInterval) -> Request {
+        public func ttl(_ ttl: CachedURLSession.TTL) -> Request {
             var copy = self
             copy.ttl = ttl
             return copy
@@ -221,7 +221,7 @@ extension Requester {
         
         if let ttl = request.ttl {
             URLProtocol.setProperty(
-                ttl,
+                ttl.seconds,
                 forKey: "AlfyCacheTTL",
                 in: urlRequest
             )

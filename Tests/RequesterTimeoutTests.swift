@@ -24,12 +24,12 @@ final class RequesterTimeoutTests: XCTestCase {
 
     /// The builder is immutable: each modifier returns a copy, and the other settings survive.
     func testTimeoutKeepsTheOtherSettingsAndTheOriginalRequest() throws {
-        let base = Requester.makeRequest(urlString).ttl(300)
+        let base = Requester.makeRequest(urlString).ttl(.seconds(300))
         let withTimeout = base.timeout(15).allowStaleOnError(false)
 
         XCTAssertNil(base.timeout)
         XCTAssertEqual(withTimeout.timeout, 15)
-        XCTAssertEqual(withTimeout.ttl, 300)
+        XCTAssertEqual(withTimeout.ttl, .seconds(300))
         XCTAssertEqual(withTimeout.allowStaleOnError, false)
     }
 }

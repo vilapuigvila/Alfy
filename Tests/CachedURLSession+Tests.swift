@@ -659,7 +659,7 @@ final class CachedURLSessionTests: XCTestCase {
         let session = URLSession(configuration: config)
         return CachedURLSession(
             configuration: CachedURLSession.Configuration(
-                ttl: ttl,
+                ttl: .init(uncheckedSeconds: ttl),
                 session: session,
                 allowStaleOnError: allowStaleOnError,
                 maxMemoryEntries: 64,
