@@ -79,6 +79,93 @@ final class CachedURLSessionTests: XCTestCase {
         XCTAssertTrue(isExpiredAfterSleep)
     }
 
+    /// Injected clock: entry with `max-age=300` is valid at +30 s, invalid at +301 s, invalid before any fetch.
+    func testIsValidCacheFollowsMaxAge() async throws {
+        let url = URL(string: "https://example.com/valid-check")!
+        TestURLProtocol.requestHandler = { request in
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Cache-Control": "max-age=300"]
+                )!,
+                Data("ok".utf8)
+            )
+        }
+
+        let start = Date()
+        let clock = Locked<Date>(start)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TestURLProtocol.self]
+        let cached = CachedURLSession(
+            configuration: CachedURLSession.Configuration(
+                ttl: .init(uncheckedSeconds: 60),
+                session: URLSession(configuration: config),
+                allowStaleOnError: true,
+                maxMemoryEntries: 64,
+                cacheNamespace: cacheNamespace,
+                cacheControlBehavior: .respectServer,
+                isOnline: { true }
+            ),
+            now: { clock.withLock { $0 } }
+        )
+
+        let beforeFetch = await cached.isValidCache(for: url)
+        XCTAssertFalse(beforeFetch)
+
+        _ = try await cached.data(from: url)
+
+        clock.withLock { $0 = start.addingTimeInterval(30) }
+        let at30 = await cached.isValidCache(for: url)
+        XCTAssertTrue(at30)
+
+        clock.withLock { $0 = start.addingTimeInterval(301) }
+        let at301 = await cached.isValidCache(for: url)
+        XCTAssertFalse(at301)
+    }
+
+    /// `Requester.isValidCache`: false for invalid/uncached URL, true after a cached fetch via the shared session.
+    func testRequesterIsValidCache() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [TestURLProtocol.self]
+        CachedURLSession.configure(
+            CachedURLSession.Configuration(
+                ttl: .init(uncheckedSeconds: 60),
+                session: URLSession(configuration: config),
+                allowStaleOnError: true,
+                maxMemoryEntries: 64,
+                cacheNamespace: cacheNamespace,
+                cacheControlBehavior: .respectServer,
+                isOnline: { true }
+            )
+        )
+        defer { CachedURLSession.configure(.init()) }
+
+        TestURLProtocol.requestHandler = { request in
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Cache-Control": "max-age=60"]
+                )!,
+                Data("ok".utf8)
+            )
+        }
+
+        let invalid = await Requester.isValidCache("not a url")
+        XCTAssertFalse(invalid)
+
+        let urlString = "https://example.com/requester-valid-check"
+        let uncached = await Requester.isValidCache(urlString)
+        XCTAssertFalse(uncached)
+
+        _ = try await Requester.request(urlString)
+        let cached = await Requester.isValidCache(urlString)
+        XCTAssertTrue(cached)
+    }
+
     /// Uses `URLRequest` initializer with `.useProtocolCachePolicy` and `timeoutInterval: 60`.
     /// First request is network (MISS), second is cached (HIT).
     func testUseProtocolCachePolicyWithTimeoutCachesSecondRequest() async throws {

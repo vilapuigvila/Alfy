@@ -121,11 +121,18 @@ public actor CachedURLSession {
     private let cacheDirectoryURL: URL
     private let cacheControlBehavior: CacheControlBehavior
     private let isOnline: @Sendable () -> Bool
+    private let now: @Sendable () -> Date
 
     private var memoryCache: [String: CacheEntry] = [:]
     private var inflight: [String: Task<(Data, URLResponse), Error>] = [:]
 
     public init(configuration: Configuration) {
+        self.init(configuration: configuration, now: { Date() })
+    }
+
+    /// Internal clock injection so tests can control freshness without sleeping.
+    init(configuration: Configuration, now: @escaping @Sendable () -> Date) {
+        self.now = now
         self.defaultTTL = configuration.ttl.seconds
         self.session = configuration.session
         self.allowStaleOnError = configuration.allowStaleOnError
@@ -159,6 +166,11 @@ public actor CachedURLSession {
             return true
         }
         return !isFresh(entry, requestTTL: nil)
+    }
+
+    /// `true` when a GET to the URL would be served from a fresh cached entry right now.
+    public func isValidCache(for url: URL) -> Bool {
+        !isCacheExpired(for: url)
     }
 
     /// Bypass or non-GET goes straight to the network; otherwise serves a fresh entry per `cachePolicy`.
@@ -297,10 +309,10 @@ public actor CachedURLSession {
     /// A request-scoped TTL also caps how old an entry may be, so a caller asking for fresher data
     /// than the entry was stored with re-fetches instead of inheriting the original lifetime.
     private func isFresh(_ entry: CacheEntry, requestTTL: TimeInterval?) -> Bool {
-        let now = Date()
-        guard now < entry.expiresAt else { return false }
+        let currentDate = now()
+        guard currentDate < entry.expiresAt else { return false }
         guard let requestTTL else { return true }
-        return now < entry.storedAt.addingTimeInterval(requestTTL)
+        return currentDate < entry.storedAt.addingTimeInterval(requestTTL)
     }
 
     private func cachedResult(
@@ -312,7 +324,7 @@ public actor CachedURLSession {
         let responseURL = url ?? URL(string: "about:blank")!
         var headers = entry.headers
         headers["X-Cache"] = cacheState
-        headers["Age"] = String(Int(Date().timeIntervalSince(entry.storedAt)))
+        headers["Age"] = String(Int(now().timeIntervalSince(entry.storedAt)))
 
         if headers["Cache-Control"] == nil {
             let maxAge = max(0, Int(entry.expiresAt.timeIntervalSince(entry.storedAt)))
@@ -332,8 +344,8 @@ public actor CachedURLSession {
         )
         NetworkLogger.log(cacheState == "STALE" ? .staleCache : .cache, url: responseURL)
         NetworkLogger.logCacheEntry(
-            age: Date().timeIntervalSince(entry.storedAt),
-            expiresIn: entry.expiresAt.timeIntervalSinceNow,
+            age: now().timeIntervalSince(entry.storedAt),
+            expiresIn: entry.expiresAt.timeIntervalSince(now()),
             url: url
         )
         if let staleCause {
@@ -374,7 +386,7 @@ public actor CachedURLSession {
             return nil
         }
 
-        let storedAt = Date()
+        let storedAt = now()
         guard let expiresAt = expirationDate(
             for: http,
             storedAt: storedAt,

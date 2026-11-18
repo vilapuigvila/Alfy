@@ -51,6 +51,12 @@ public struct Requester {
         return try await cachedSession.data(for: _request)
     }
     
+    /// `true` when a GET to `urlString` would be served from the shared cache now; `false` for no entry, expired entry or invalid URL.
+    public static func isValidCache(_ urlString: String) async -> Bool {
+        guard let url = URL(string: urlString) else { return false }
+        return await cachedSession.isValidCache(for: url)
+    }
+
     /// Cached GET decoded as JSON into `D`. Throws `ErrorReason.generic(statusCode:)` for non-2xx.
     public static func request<D: Decodable>(
         _ urlString: String,
