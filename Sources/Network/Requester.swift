@@ -72,6 +72,7 @@ extension Requester {
         public var headers: [HeaderParam]
         public var cachePolicy: URLRequest.CachePolicy?
         public var ttl: TimeInterval?
+        public var timeout: TimeInterval?
         public var allowStaleOnError: Bool?
         public var cacheControlBehavior: CachedURLSession.CacheControlBehavior?
         public var isBypassCache: Bool?
@@ -81,6 +82,7 @@ extension Requester {
             self.headers = []
             self.cachePolicy = nil
             self.ttl = nil
+            self.timeout = nil
             self.allowStaleOnError = nil
             self.cacheControlBehavior = nil
             self.isBypassCache = nil
@@ -113,6 +115,14 @@ extension Requester {
         public func ttl(_ ttl: TimeInterval) -> Request {
             var copy = self
             copy.ttl = ttl
+            return copy
+        }
+
+        /// Seconds the connection may stay silent before the call fails with `URLError.timedOut` (not a cap on the whole
+        /// download). Unset keeps the session's 60 s. A timeout is an error like any other, so `allowStaleOnError` applies.
+        public func timeout(_ seconds: TimeInterval) -> Request {
+            var copy = self
+            copy.timeout = seconds
             return copy
         }
 
@@ -191,7 +201,7 @@ extension Requester {
     
     /// Builds the GET `URLRequest` and stamps cache overrides as `URLProtocol` properties.
     /// `CachedURLSession` reads them back by the same key strings.
-    private static func buildRequest(_ request: Request) throws -> URLRequest {
+    static func buildRequest(_ request: Request) throws -> URLRequest {
         guard let url = URL(string: request.urlString) else {
             assertionFailure()
             throw ErrorReason.urlCreationFailed
@@ -200,6 +210,9 @@ extension Requester {
         urlRequest.httpMethod = "GET"
         if let cachePolicy = request.cachePolicy {
             urlRequest.cachePolicy = cachePolicy
+        }
+        if let timeout = request.timeout {
+            urlRequest.timeoutInterval = timeout
         }
 
         computedHeaders(request.headers).forEach {
